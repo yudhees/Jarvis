@@ -563,4 +563,5 @@ Known issues / notes:
 - PvSpeaker's buffer size must be whole seconds (minimum 1); fractions fail at init.
 - `@picovoice/pvspeaker-node` has no types entry in package.json; mapped in `packages/core/src/types/pvspeaker.d.ts`.
 - Whether stopped audio cuts off audibly at once (vs. draining the 1 s device buffer) has not been confirmed by ear.
+- Run `npm run setup-whisper` from your own terminal, not through the Claude desktop app. That app is packaged, so Windows hides anything it writes to AppData in a private folder, and the script now warns when that happens. The first install was moved to the real `%APPDATA%\jarvis` on 2026-11-14.
 - Remote: `origin` is github.com/yudhees/Jarvis. The GitHub CLI (`gh`) is not installed yet, so issues are not created yet.
