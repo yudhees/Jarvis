@@ -1,5 +1,6 @@
 export { type ClaudeCliOptions, ClaudeCliReplyModel, findClaudeExe } from './claude-cli.ts';
 export {
+  afterWakeWord,
   isWakeWordOnly,
   matchCommand,
   normalizeUtterance,
@@ -24,6 +25,7 @@ export {
   VoiceLoop,
   type VoiceLoopDeps,
   type VoiceLoopTiming,
+  WAKE_HINT,
 } from './loop.ts';
 export { MissingKeyError, type OpenedConversation, openConversation } from './open.ts';
 export { SentenceSplitter, spokenNow } from './sentences.ts';

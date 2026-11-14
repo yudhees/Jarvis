@@ -41,6 +41,9 @@ export class PetProcess {
     child.on('error', (err) => this.#onLog(`Pet could not start: ${err.message}`));
     child.on('exit', (code) => {
       if (this.#stopping) return;
+      // Exit code 0 is a clean quit: the user chose Quit, or a pet that was
+      // already running took over. Only a crash is restarted.
+      if (code === 0) return;
       if (this.#restarts < 1) {
         this.#restarts++;
         this.#onLog(`Pet exited (${code}); restarting it once.`);

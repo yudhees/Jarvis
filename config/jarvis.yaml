@@ -17,7 +17,7 @@ listening:
   startTimeoutSeconds: 5 # after "Jarvis", give up if you say nothing
 
 keywords: # how Jarvis hears "Jarvis" (Ctrl+Alt+L always works too)
-  provider: windows # windows = built-in recognizer, no account | picovoice | none = hotkey only
+  provider: whisper # whisper = checks speech with Whisper (best for most voices) | windows = built-in recognizer | picovoice | none = hotkey only
   minConfidence: 0.6 # windows: 0..1, higher = fewer false wakes, more misses
   gain: 1 # windows: boost a quiet mic before recognizing; tune with: npm run wake-test -- --gain 4
   wake: jarvis # picovoice only: built-in keyword or a custom .ppn path

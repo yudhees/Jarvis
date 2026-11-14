@@ -31,7 +31,7 @@ public class JarvisPipeAudio : Stream {
     int got = 0;
     while (got < count) {
       int n = src.Read(buffer, offset + got, count - got);
-      if (n == 0) { Thread.Sleep(10); continue; }
+      if (n == 0) Environment.Exit(0); // core ended: its pipe closed
       got += n;
     }
     pos += got;

@@ -63,10 +63,11 @@ export const jarvisSchema = z.strictObject({
   }),
   keywords: z.strictObject({
     /**
+     * whisper = speech while asleep is checked with Whisper (works for most voices);
      * windows = the speech recognizer built into Windows (no account);
      * picovoice = Porcupine (needs an AccessKey); none = Ctrl+Alt+L only.
      */
-    provider: z.enum(['windows', 'picovoice', 'none']),
+    provider: z.enum(['whisper', 'windows', 'picovoice', 'none']),
     /** Windows: lowest recognizer confidence that counts (0..1). */
     minConfidence: z.number().min(0).max(1),
     /** Windows: volume boost before recognizing, for quiet mics (find it with npm run wake-test). */

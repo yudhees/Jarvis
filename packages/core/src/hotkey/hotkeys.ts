@@ -20,7 +20,7 @@ export class WindowsHotkeys {
       const ps = spawn(
         'powershell.exe',
         ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', SCRIPT],
-        { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true },
+        { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }, // stdin open = core alive
       );
       this.#ps = ps;
       const taken: HotkeyAction[] = [];

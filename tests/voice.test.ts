@@ -13,6 +13,7 @@ import { StateError, StateMachine } from '@jarvis/core/state';
 import type { SttProvider } from '@jarvis/core/stt';
 import { type TtsProvider, WindowsSapiTts } from '@jarvis/core/tts';
 import {
+  afterWakeWord,
   Conversation,
   isWakeWordOnly,
   type ModelRequest,
@@ -365,7 +366,14 @@ const STOP = frame(-78);
 function fakeLoop(
   replyText: string,
   playMs = 30,
-  opts: { wakeWord?: boolean; thinkMs?: number; playLevel?: number } = {},
+  opts: {
+    wakeWord?: boolean;
+    thinkMs?: number;
+    playLevel?: number;
+    /** What Whisper "hears", one entry per call (the last one repeats). */
+    heard?: string[];
+    wakeByTranscript?: boolean;
+  } = {},
 ) {
   const feed = new FrameFeed();
   const keywords = new FakeKeywords();
@@ -378,7 +386,10 @@ function fakeLoop(
   const stt: SttProvider = {
     transcribe: async (pcm) => {
       heardSeconds.push(pcm.length / RATE);
-      return { text: "Jarvis, what's two plus two?", ms: 5 };
+      const text =
+        (opts.heard && (opts.heard.length > 1 ? opts.heard.shift() : opts.heard[0])) ??
+        "Jarvis, what's two plus two?";
+      return { text, ms: 5 };
     },
     close: async () => {},
   };
@@ -406,6 +417,7 @@ function fakeLoop(
   const loop = new VoiceLoop({
     frames: (s) => feed.frames(s),
     keywords: opts.wakeWord === false ? null : keywords,
+    wakeByTranscript: opts.wakeByTranscript,
     stt,
     tts,
     player,
@@ -755,5 +767,71 @@ describe('BargeIn', () => {
     let hit = false;
     for (let i = 0; i < 9; i++) hit = b.push(frame(-8), out, -70);
     assert.equal(hit, true, 'the user, 22 dB above the echo');
+  });
+});
+
+describe('waking on what Whisper hears', () => {
+  const asleepWithWhisper = (heard: string[]) =>
+    fakeLoop('Four.', 30, { wakeWord: false, wakeByTranscript: true, heard });
+  const burst = (feed: FrameFeed) => {
+    feed.push(SPEECH, 15);
+    feed.push(QUIET, 25); // 600 ms of quiet ends a burst while asleep
+  };
+
+  it('"Jabbies, what\'s two plus two" in one breath is answered directly', async () => {
+    const t = asleepWithWhisper(["Jabbies, what's two plus two?"]);
+    const quit = new AbortController();
+    const running = t.loop.run(quit.signal);
+    await until(() => t.feed.opened === 1);
+    t.feed.push(QUIET, 20);
+    burst(t.feed);
+    await until(() => t.asked.length === 1);
+    assert.deepEqual(t.asked, ["what's two plus two?"]);
+    assert.equal(t.heardSeconds.length, 1, 'transcribed once, not again');
+    quit.abort();
+    await running;
+  });
+
+  it('the name alone: wakes and listens for the request', async () => {
+    const t = asleepWithWhisper(['Hey Jarvis.', 'What time is it?']);
+    const quit = new AbortController();
+    const running = t.loop.run(quit.signal);
+    await until(() => t.feed.opened === 1);
+    t.feed.push(QUIET, 20);
+    burst(t.feed);
+    await until(() => t.loop.state === 'LISTENING');
+    say(t.feed);
+    await until(() => t.asked.length === 1);
+    assert.deepEqual(t.asked, ['What time is it?']);
+    quit.abort();
+    await running;
+  });
+
+  it('ordinary talk does not wake it', async () => {
+    const t = asleepWithWhisper(['The tattoos', 'I told Jarvis about it.']);
+    const quit = new AbortController();
+    const running = t.loop.run(quit.signal);
+    await until(() => t.feed.opened === 1);
+    t.feed.push(QUIET, 20);
+    burst(t.feed);
+    await until(() => t.heardSeconds.length === 1);
+    burst(t.feed);
+    await until(() => t.heardSeconds.length === 2);
+    await tick(30);
+    assert.equal(t.loop.state, 'SLEEPING');
+    assert.deepEqual(t.asked, []);
+    assert.equal(t.feed.released, 0, 'the mic stays open while asleep, to hear the name');
+    quit.abort();
+    await running;
+  });
+
+  it('matches the name as Whisper writes it for different voices', () => {
+    assert.equal(afterWakeWord('Jabbies!'), '');
+    assert.equal(afterWakeWord('Hey Javis, open Slack.'), 'open Slack.');
+    assert.equal(afterWakeWord('Okay, Jarvis.'), '');
+    assert.equal(afterWakeWord('I told Jarvis about it'), null);
+    assert.equal(afterWakeWord('James called me'), null);
+    assert.equal(afterWakeWord('Travis is coming'), null);
+    assert.equal(afterWakeWord('The tattoos'), null);
   });
 });

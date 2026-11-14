@@ -13,8 +13,20 @@ public static class JarvisHotkeys {
   public static extern bool RegisterHotKey(IntPtr hWnd, int id, uint mods, uint vk);
   [DllImport("user32.dll")]
   public static extern int GetMessage(out MSG msg, IntPtr hWnd, uint min, uint max);
+
+  // Core keeps our stdin open; when core ends (even by a crash) it closes, and
+  // this host exits instead of holding the hotkeys forever.
+  public static void ExitWithParent() {
+    var t = new System.Threading.Thread(() => {
+      while (Console.In.Read() != -1) { }
+      Environment.Exit(0);
+    });
+    t.IsBackground = true;
+    t.Start();
+  }
 }
 '@
+[JarvisHotkeys]::ExitWithParent()
 
 $MOD_ALT = 0x1; $MOD_CONTROL = 0x2; $MOD_NOREPEAT = 0x4000
 $keys = @{ 1 = @('stop', 0x4A); 2 = @('mute', 0x4D); 3 = @('talk', 0x4C) }  # J, M, L

@@ -6,3 +6,6 @@ export type {
   ModelsConfig,
   PermissionsConfig,
 } from './schema.ts';
+export type { EditableKey, EditableSettings, SettingsResult } from './settings.ts';
+export { EDITABLE_SETTINGS, LIVE_SETTINGS, readSettings, writeSettings } from './settings.ts';
+export { watchJarvisConfig } from './watch.ts';

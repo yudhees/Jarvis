@@ -11,7 +11,7 @@ import {
 import { StateMachine } from '../state/index.ts';
 import type { SttProvider } from '../stt/index.ts';
 import type { TtsProvider } from '../tts/index.ts';
-import { isWakeWordOnly, matchCommand, stripWakeWord } from './commands.ts';
+import { afterWakeWord, isWakeWordOnly, matchCommand, stripWakeWord } from './commands.ts';
 import type { AskOptions, AskResult } from './conversation.ts';
 import { SpeechQueue } from './speech-queue.ts';
 
@@ -54,6 +54,12 @@ export interface VoiceLoopDeps {
    * hotkey (`talk()`), and the mic is closed completely while Jarvis sleeps.
    */
   keywords: KeywordSpotter | null;
+  /**
+   * Wake on Whisper's transcript instead of a keyword engine: while asleep,
+   * short bursts of speech are transcribed and checked for "(hey) Jarvis".
+   * Works for voices the Windows recognizer cannot follow.
+   */
+  wakeByTranscript?: boolean;
   stt: SttProvider;
   tts: TtsProvider;
   player: AudioPlayer;
@@ -87,6 +93,17 @@ const BARGE_IN_MS = 280;
 const BARGE_IN_REPLAY_SECONDS = BARGE_IN_MS / 1000 + 0.05;
 /** Frames quieter than this at the end of a request are the pause, not words. */
 const TRAILING_QUIET_DBFS = -50;
+/** While asleep, this much quiet ends a burst of speech to check for "Jarvis". */
+const WAKE_SILENCE_MS = 600;
+/** Bursts longer than this are cut and checked anyway ("Jarvis, ..." in one breath). */
+const WAKE_MAX_MS = 8000;
+/** Shorter bursts are not checked. */
+const WAKE_MIN_SECONDS = 0.35;
+/**
+ * Tells Whisper the name exists. A sentence, not the bare word: with only
+ * "Jarvis" as context, Whisper treats the name as already said and drops it.
+ */
+export const WAKE_HINT = 'Talking to Jarvis, the assistant.';
 
 /** Where the last loud frame of `pcm` ends (trailing quiet cut off). */
 function speechEnd(pcm: Int16Array, frameLength: number): number {
@@ -115,6 +132,19 @@ export class VoiceLoop {
   #playing = 0;
   /** Audio of the request being answered, joined with the rest if the user goes on talking. */
   #utterance: Int16Array | undefined;
+  /** Finds bursts of speech while asleep (wakeByTranscript). */
+  #sleepEp: Endpointer | undefined;
+  /** A burst is being checked for the wake word. */
+  #checkingWake = false;
+  /** Jarvis is saying something while asleep (the greeting): don't listen to itself. */
+  #announcing = false;
+  /** run() is ending. */
+  #closing = false;
+
+  /** Something listens to the room while asleep (keyword engine or Whisper). */
+  get #hearsWhileAsleep(): boolean {
+    return this.#d.keywords !== null || this.#d.wakeByTranscript === true;
+  }
 
   constructor(deps: VoiceLoopDeps) {
     this.#d = deps;
@@ -125,7 +155,9 @@ export class VoiceLoop {
     this.#sm = new StateMachine((state) => {
       deps.emit({ type: 'state', state });
       // Without a wake word nothing needs to hear the room while asleep: release the mic.
-      if (state === 'SLEEPING' && !deps.keywords) this.#mic?.abort();
+      if (state === 'SLEEPING' && !this.#hearsWhileAsleep) this.#mic?.abort();
+      // A half-heard burst from before this conversation must not be checked later.
+      if (state !== 'SLEEPING') this.#sleepEp = undefined;
     });
   }
 
@@ -141,13 +173,14 @@ export class VoiceLoop {
   /** Runs until the signal aborts. */
   async run(signal: AbortSignal): Promise<void> {
     signal.addEventListener('abort', () => {
+      this.#closing = true;
       this.#cancelTask();
       this.#mic?.abort();
       this.#resume?.resolve();
     });
     while (!signal.aborted) {
       const state = this.#sm.state;
-      if (state === 'MUTED' || (state === 'SLEEPING' && !this.#d.keywords)) {
+      if (state === 'MUTED' || (state === 'SLEEPING' && !this.#hearsWhileAsleep)) {
         this.#resume = Promise.withResolvers();
         await this.#resume.promise;
         continue;
@@ -166,6 +199,27 @@ export class VoiceLoop {
       }
     }
     this.#cancelTask();
+  }
+
+  /**
+   * Says something while asleep (the startup greeting). The wake check is paused
+   * meanwhile, so Jarvis never wakes on its own voice (CLAUDE.md 10.4).
+   */
+  async announce(text: string): Promise<void> {
+    if (this.#sm.state !== 'SLEEPING') return;
+    this.#announcing = true;
+    this.#sleepEp = undefined;
+    try {
+      const audio = await this.#d.tts.synthesize(text);
+      if (this.#sm.state !== 'SLEEPING') return;
+      await this.#d.player.play(audio.pcm, audio.sampleRate, {
+        onLevel: (level) => this.#onSpeakLevel(level),
+      });
+    } finally {
+      this.#announcing = false;
+      this.#playing = 0;
+      this.#sleepEp = undefined; // drop anything heard while speaking
+    }
   }
 
   /** Kill switch: voice, hotkey, or tray. Cancels the task, stops audio, sleeps. */
@@ -230,6 +284,8 @@ export class VoiceLoop {
         this.#d.conversation.warm?.();
         this.#listen(this.#d.timing.startTimeoutMs);
         this.#replay(hit.startSample);
+      } else if (this.#d.wakeByTranscript) {
+        this.#listenWhileAsleep(frame);
       }
       return;
     }
@@ -252,6 +308,55 @@ export class VoiceLoop {
       return;
     }
     this.#feed(frame);
+  }
+
+  /** While asleep: find a burst of speech and check it for the wake word. */
+  #listenWhileAsleep(frame: Int16Array): void {
+    if (this.#checkingWake || this.#announcing) return;
+    const t = this.#d.timing;
+    this.#sleepEp ??= new Endpointer({
+      sampleRate: t.sampleRate,
+      frameLength: t.frameLength,
+      silenceMs: WAKE_SILENCE_MS,
+      startTimeoutMs: 10_000, // then start fresh, so memory stays bounded
+      maxMs: WAKE_MAX_MS,
+      floorDbfs: this.#floor.dbfs,
+    });
+    const r = this.#sleepEp.push(frame);
+    if (r.type === 'no_speech') this.#sleepEp = undefined;
+    if (r.type !== 'end') return;
+    this.#sleepEp = undefined;
+    // Too short to be "Jarvis" (a click, a cough): don't wake Whisper for it.
+    if (r.pcm.length < t.sampleRate * WAKE_MIN_SECONDS) return;
+    void this.#checkWake(r.pcm, this.#samples);
+  }
+
+  async #checkWake(pcm: Int16Array, endSample: number): Promise<void> {
+    this.#checkingWake = true;
+    try {
+      const heard = await this.#d.stt.transcribe(pcm, this.#d.timing.sampleRate, {
+        hints: [WAKE_HINT, ...(this.#d.hints?.() ?? [])],
+      });
+      if (this.#sm.state !== 'SLEEPING') return;
+      const rest = afterWakeWord(heard.text);
+      if (rest === null) return; // talk that was not for Jarvis
+      this.#d.onWake?.();
+      this.#d.conversation.warm?.();
+      if (rest) {
+        // "Jarvis, what's the time" in one breath: that was the request.
+        this.#sm.to('LISTENING');
+        void this.#turn(pcm, rest);
+      } else {
+        // Only the name: the request comes now. Keep what was said since.
+        this.#listen(this.#d.timing.startTimeoutMs);
+        this.#replay(endSample, 0);
+      }
+    } catch (err) {
+      // Shutting down cuts Whisper off mid-check; that is not worth reporting.
+      if (!this.#closing) this.#d.onError?.(err);
+    } finally {
+      this.#checkingWake = false;
+    }
   }
 
   #onSpeakLevel(level: number): void {
@@ -338,7 +443,7 @@ export class VoiceLoop {
   }
 
   /** One request: transcribe, answer, speak, then the follow-up window. */
-  async #turn(pcm: Int16Array): Promise<void> {
+  async #turn(pcm: Int16Array, alreadyHeard?: string): Promise<void> {
     const task = new AbortController();
     this.#task = task;
     const { signal } = task;
@@ -349,10 +454,13 @@ export class VoiceLoop {
     let filler: NodeJS.Timeout | undefined;
     this.#sm.to('THINKING');
     try {
-      const transcript = await this.#d.stt.transcribe(pcm, this.#d.timing.sampleRate, {
-        hints: this.#d.hints?.(),
-        signal,
-      });
+      const transcript =
+        alreadyHeard !== undefined
+          ? { text: alreadyHeard, ms: 0 }
+          : await this.#d.stt.transcribe(pcm, this.#d.timing.sampleRate, {
+              hints: this.#d.hints?.(),
+              signal,
+            });
       if (signal.aborted) return;
       log.sttMs = transcript.ms;
       const fix = this.#d.fixTranscript ?? ((s: string) => s);

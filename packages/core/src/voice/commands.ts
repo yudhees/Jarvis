@@ -58,6 +58,36 @@ export function isWakeWordOnly(text: string): boolean {
   return words.length === 1 && !!word && word.startsWith('j') && distance(word, 'jarvis') <= 3;
 }
 
+/** Words that may come before the name: "hey Jarvis", "okay Jarvis". */
+const LEAD_INS = new Set(['hey', 'hi', 'hay', 'ok', 'okay', 'a', 'oh', 'so']);
+
+/** "Jarvis" as Whisper may write it for different voices: Jarvis, Javis, Jabbies, Charvis. */
+function soundsLikeJarvis(word: string): boolean {
+  if (word.length < 4 || word.length > 8) return false;
+  const d = distance(word, 'jarvis');
+  const jSound = word.startsWith('j') || word.startsWith('ch');
+  // Looser only for longer words ("Jabbies"), so short names ("James") don't wake it.
+  return d <= 1 || (d <= 2 && jSound) || (d <= 3 && jSound && word.length >= 6);
+}
+
+/**
+ * When the user starts with the wake word ("Hey Jarvis, what's the time"),
+ * returns what came after it ('' if nothing); null when it does not start with
+ * the name. Used to wake on Whisper's transcript instead of a keyword engine.
+ */
+export function afterWakeWord(text: string): string | null {
+  const words = text.trim().split(/\s+/);
+  let i = 0;
+  while (i < words.length - 1 && LEAD_INS.has(normalizeUtterance(words[i] ?? ''))) i++;
+  if (i > 2) return null;
+  if (!soundsLikeJarvis(normalizeUtterance(words[i] ?? ''))) return null;
+  return words
+    .slice(i + 1)
+    .join(' ')
+    .replace(/^[\s,.!?:;-]+/, '')
+    .trim();
+}
+
 /** Lowercase, no punctuation, single spaces. */
 export function normalizeUtterance(text: string): string {
   return text

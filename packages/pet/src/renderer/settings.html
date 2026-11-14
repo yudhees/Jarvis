@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:">
+  <title>Jarvis Settings</title>
+  <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+  <aside class="side">
+    <div class="brand">
+      <svg viewBox="0 0 40 40" aria-hidden="true" class="brand-mark">
+        <rect x="5" y="7" width="30" height="28" rx="10" class="m-shell"/>
+        <rect x="9" y="13" width="22" height="13" rx="6" class="m-visor"/>
+        <ellipse cx="16" cy="19.5" rx="2" ry="2.6" class="m-eye"/>
+        <ellipse cx="24" cy="19.5" rx="2" ry="2.6" class="m-eye"/>
+        <circle cx="20" cy="4" r="2" class="m-eye"/>
+      </svg>
+      <div>
+        <div class="brand-name">Jarvis</div>
+        <div class="status" id="status"><span class="dot"></span><span id="statusText">Checking…</span></div>
+      </div>
+    </div>
+    <button type="button" class="btn power" id="power" disabled>Start Jarvis</button>
+    <div class="nav" role="tablist" aria-label="Settings sections" aria-orientation="vertical">
+      <button type="button" role="tab" id="tab-appearance" aria-controls="appearance" aria-selected="true">Appearance</button>
+      <button type="button" role="tab" id="tab-voice" aria-controls="voice" aria-selected="false" tabindex="-1">Voice</button>
+      <button type="button" role="tab" id="tab-listening" aria-controls="listening" aria-selected="false" tabindex="-1">Listening</button>
+      <button type="button" role="tab" id="tab-behavior" aria-controls="behavior" aria-selected="false" tabindex="-1">Behavior</button>
+      <button type="button" role="tab" id="tab-about" aria-controls="about" aria-selected="false" tabindex="-1">About</button>
+    </div>
+    <p class="side-note">Changes save on their own and show on the pet right away.</p>
+  </aside>
+
+  <main class="content">
+    <!-- Appearance -->
+    <section role="tabpanel" id="appearance" aria-labelledby="tab-appearance">
+      <header class="head">
+        <h1>Appearance</h1>
+        <p>How the pet looks on your desktop.</p>
+      </header>
+
+      <div class="card">
+        <h2>Character</h2>
+        <div class="looks" role="radiogroup" aria-label="Character">
+          <label class="look">
+            <input type="radio" name="look" value="robot">
+            <svg viewBox="0 0 80 80" aria-hidden="true">
+              <line x1="40" y1="16" x2="40" y2="9" class="p-edge"/>
+              <circle cx="40" cy="8" r="3" class="p-glow"/>
+              <rect x="14" y="16" width="52" height="52" rx="17" class="p-shell"/>
+              <rect x="20" y="26" width="40" height="25" rx="11" class="p-visor"/>
+              <ellipse cx="32" cy="37.5" rx="3.5" ry="4.5" class="p-glow"/>
+              <ellipse cx="48" cy="37.5" rx="3.5" ry="4.5" class="p-glow"/>
+              <rect x="36" y="44" width="8" height="2" rx="1" class="p-glow"/>
+            </svg>
+            <span>Robot</span>
+          </label>
+          <label class="look">
+            <input type="radio" name="look" value="orb">
+            <svg viewBox="0 0 80 80" aria-hidden="true">
+              <circle cx="40" cy="41" r="26" class="p-orb"/>
+              <ellipse cx="32" cy="38" rx="3.5" ry="4.5" class="p-glow"/>
+              <ellipse cx="48" cy="38" rx="3.5" ry="4.5" class="p-glow"/>
+              <rect x="36" y="45" width="8" height="2" rx="1" class="p-glow"/>
+            </svg>
+            <span>Orb</span>
+          </label>
+          <label class="look">
+            <input type="radio" name="look" value="cat">
+            <svg viewBox="0 0 160 160" aria-hidden="true"><path class="a-shell" d="M34 64 L40 20 L70 46 Z M126 64 L120 20 L90 46 Z"/><path class="a-inner" d="M42 52 L44 32 L60 46 Z M118 52 L116 32 L100 46 Z"/><ellipse class="a-shell" cx="80" cy="86" rx="54" ry="48"/><ellipse class="a-face" cx="80" cy="80" rx="38" ry="27"/><path class="a-line" d="M40 94 L18 90 M40 100 L18 104 M120 94 L142 90 M120 100 L142 104"/><ellipse class="p-glow" cx="64" cy="75" rx="7" ry="9"/><ellipse class="p-glow" cx="96" cy="75" rx="7" ry="9"/><rect class="p-glow" x="72" y="88" width="16" height="4" rx="2"/></svg>
+            <span>Cat</span>
+          </label>
+          <label class="look">
+            <input type="radio" name="look" value="bear">
+            <svg viewBox="0 0 160 160" aria-hidden="true"><circle class="a-shell" cx="40" cy="42" r="17"/><circle class="a-shell" cx="120" cy="42" r="17"/><circle class="a-face" cx="40" cy="42" r="8"/><circle class="a-face" cx="120" cy="42" r="8"/><circle class="a-shell" cx="80" cy="86" r="54"/><rect class="a-face" x="44" y="56" width="72" height="48" rx="24"/><ellipse class="p-glow" cx="64" cy="75" rx="7" ry="9"/><ellipse class="p-glow" cx="96" cy="75" rx="7" ry="9"/><rect class="p-glow" x="72" y="88" width="16" height="4" rx="2"/></svg>
+            <span>Bear</span>
+          </label>
+          <label class="look">
+            <input type="radio" name="look" value="ghost">
+            <svg viewBox="0 0 160 160" aria-hidden="true"><path class="a-glowline" d="M30 134 V80 A50 50 0 0 1 130 80 V134 l-12.5 -10 l-12.5 10 l-12.5 -10 l-12.5 10 l-12.5 -10 l-12.5 10 l-12.5 -10 l-12.5 10 Z"/><ellipse class="p-glow" cx="64" cy="75" rx="7" ry="9"/><ellipse class="p-glow" cx="96" cy="75" rx="7" ry="9"/><rect class="p-glow" x="72" y="88" width="16" height="4" rx="2"/></svg>
+            <span>Ghost</span>
+          </label>
+          <label class="look">
+            <input type="radio" name="look" value="tv">
+            <svg viewBox="0 0 160 160" aria-hidden="true"><path class="a-line" d="M80 34 L60 12 M80 34 L100 12"/><rect class="a-shell" x="22" y="34" width="116" height="96" rx="18"/><rect class="a-face" x="34" y="48" width="78" height="60" rx="14"/><circle class="a-knob" cx="124" cy="62" r="5"/><circle class="a-knob" cx="124" cy="80" r="5"/><path class="a-line" d="M44 130 L38 144 M116 130 L122 144"/><ellipse class="p-glow" cx="64" cy="75" rx="7" ry="9"/><ellipse class="p-glow" cx="96" cy="75" rx="7" ry="9"/><rect class="p-glow" x="72" y="88" width="16" height="4" rx="2"/></svg>
+            <span>Retro TV</span>
+          </label>
+          <label class="look">
+            <input type="radio" name="look" value="logo" id="lookLogo">
+            <span class="logo-box" id="logoBox">
+              <img id="logoImg" alt="" hidden>
+              <span class="logo-empty" id="logoEmpty">Your image</span>
+            </span>
+            <span>Your logo</span>
+          </label>
+        </div>
+        <div class="row">
+          <div class="label">
+            <span>Logo image</span>
+            <small>PNG or JPEG. Square works best; it is shrunk to 256 pixels.</small>
+          </div>
+          <div class="control">
+            <input type="file" id="logoFile" accept="image/png,image/jpeg" hidden>
+            <button type="button" class="btn" id="pickLogo">Choose image…</button>
+            <button type="button" class="btn ghost" id="removeLogo" hidden>Remove</button>
+          </div>
+        </div>
+        <div class="row">
+          <label class="label" for="logoInTray">
+            <span>Use the logo as the tray icon</span>
+            <small>The tray shows the grey robot while muted, so mute is always clear.</small>
+          </label>
+          <div class="control"><input type="checkbox" class="switch" id="logoInTray"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Theme</h2>
+        <div class="row">
+          <div class="label"><span>Mode</span><small>System follows your Windows setting.</small></div>
+          <div class="control">
+            <div class="seg" role="radiogroup" aria-label="Theme">
+              <label><input type="radio" name="theme" value="system"><span>System</span></label>
+              <label><input type="radio" name="theme" value="light"><span>Light</span></label>
+              <label><input type="radio" name="theme" value="dark"><span>Dark</span></label>
+            </div>
+          </div>
+        </div>
+        <div class="row stack">
+          <div class="label"><span>Accent</span><small>Buttons, the model badge, and highlights.</small></div>
+          <div class="swatches" id="accentSwatches" role="radiogroup" aria-label="Accent color"></div>
+        </div>
+        <div class="row stack">
+          <div class="label"><span>Glow</span><small>Eyes, listening ring, and mouth.</small></div>
+          <div class="swatches" id="glowSwatches" role="radiogroup" aria-label="Glow color"></div>
+        </div>
+        <div class="row">
+          <label class="label" for="size"><span>Size</span><small>How big the pet is on screen.</small></label>
+          <div class="control range">
+            <input type="range" id="size" min="80" max="125" step="5">
+            <output id="sizeOut" for="size"></output>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Voice -->
+    <section role="tabpanel" id="voice" aria-labelledby="tab-voice" hidden>
+      <header class="head">
+        <h1>Voice</h1>
+        <p>How Jarvis sounds when it talks back.</p>
+      </header>
+      <div class="card">
+        <div class="row">
+          <label class="label" for="voiceName">
+            <span>Voice <em class="tag" data-for="voice.voice"></em></span>
+            <small>Voices installed in Windows.</small>
+          </label>
+          <div class="control"><select id="voiceName"><option value="">Loading voices…</option></select></div>
+        </div>
+        <div class="row">
+          <label class="label" for="voiceRate"><span>Speed <em class="tag" data-for="voice.rate"></em></span><small>From slow to fast.</small></label>
+          <div class="control range">
+            <input type="range" id="voiceRate" min="-10" max="10" step="1">
+            <output id="voiceRateOut" for="voiceRate"></output>
+          </div>
+        </div>
+        <div class="row stack">
+          <label class="label" for="previewText"><span>Try it</span><small>Plays here, on this PC's default speakers.</small></label>
+          <div class="try">
+            <input type="text" id="previewText" maxlength="200" value="Hi, I'm Jarvis. What can I do for you?">
+            <button type="button" class="btn primary" id="playPreview">Play</button>
+          </div>
+        </div>
+      </div>
+      <p class="note">Only the classic Windows voices work here. More natural voices (Piper, ElevenLabs) are a planned upgrade.</p>
+    </section>
+
+    <!-- Listening -->
+    <section role="tabpanel" id="listening" aria-labelledby="tab-listening" hidden>
+      <header class="head">
+        <h1>Listening</h1>
+        <p>How Jarvis hears its name and knows you have finished.</p>
+      </header>
+      <div class="card">
+        <h2>Wake word</h2>
+        <div class="row">
+          <label class="label" for="wakeProvider">
+            <span>How to wake Jarvis <em class="tag" data-for="keywords.provider"></em></span>
+            <small>Ctrl+Alt+L always works too.</small>
+          </label>
+          <div class="control">
+            <select id="wakeProvider">
+              <option value="whisper">Say "Jarvis" (Whisper, best for most voices)</option>
+              <option value="windows">Say "Jarvis" (Windows recognizer)</option>
+              <option value="picovoice">Say "Jarvis" (Picovoice, needs a key)</option>
+              <option value="none">Hotkey only, mic off while asleep</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <label class="label" for="minConfidence">
+            <span>Wake strictness <em class="tag" data-for="keywords.minConfidence"></em></span>
+            <small>Windows recognizer only. Higher means fewer false wakes, but more misses.</small>
+          </label>
+          <div class="control range">
+            <input type="range" id="minConfidence" min="0.3" max="0.95" step="0.05">
+            <output id="minConfidenceOut" for="minConfidence"></output>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Conversation</h2>
+        <div class="row">
+          <label class="label" for="silenceMs">
+            <span>Pause that ends your sentence <em class="tag" data-for="listening.silenceMs"></em></span>
+            <small>Longer lets you think mid-sentence; shorter answers sooner.</small>
+          </label>
+          <div class="control range">
+            <input type="range" id="silenceMs" min="400" max="3000" step="100">
+            <output id="silenceMsOut" for="silenceMs"></output>
+          </div>
+        </div>
+        <div class="row">
+          <label class="label" for="followUp">
+            <span>Follow-up window <em class="tag" data-for="listening.followUpSeconds"></em></span>
+            <small>After an answer, reply without saying "Jarvis" again.</small>
+          </label>
+          <div class="control range">
+            <input type="range" id="followUp" min="2" max="30" step="1">
+            <output id="followUpOut" for="followUp"></output>
+          </div>
+        </div>
+        <div class="row">
+          <label class="label" for="bargeIn">
+            <span>Interrupt by talking <em class="tag" data-for="listening.bargeIn"></em></span>
+            <small>Speak while Jarvis talks and it stops to listen.</small>
+          </label>
+          <div class="control"><input type="checkbox" class="switch" id="bargeIn"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Behavior -->
+    <section role="tabpanel" id="behavior" aria-labelledby="tab-behavior" hidden>
+      <header class="head">
+        <h1>Behavior</h1>
+        <p>When the pet shows itself, and what Jarvis remembers.</p>
+      </header>
+      <div class="card">
+        <h2>Pet</h2>
+        <div class="row">
+          <label class="label" for="hideWhenIdle">
+            <span>Hide when idle</span>
+            <small>Fades out after Jarvis goes back to sleep. Saying "Jarvis" brings it back.</small>
+          </label>
+          <div class="control"><input type="checkbox" class="switch" id="hideWhenIdle"></div>
+        </div>
+        <div class="row">
+          <label class="label" for="idleSeconds"><span>Hide after</span><small>Seconds of quiet before it fades.</small></label>
+          <div class="control range">
+            <input type="range" id="idleSeconds" min="2" max="60" step="1">
+            <output id="idleSecondsOut" for="idleSeconds"></output>
+          </div>
+        </div>
+        <div class="row">
+          <label class="label" for="startWithWindows"><span>Start with Windows</span><small>Open the pet when you sign in.</small></label>
+          <div class="control"><input type="checkbox" class="switch" id="startWithWindows"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Learning</h2>
+        <div class="row">
+          <label class="label" for="learning">
+            <span>Learn from me <em class="tag" data-for="learning.enabled"></em></span>
+            <small>Preferences, name spellings, and which model suits you. Never permissions.</small>
+          </label>
+          <div class="control"><input type="checkbox" class="switch" id="learning"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- About -->
+    <section role="tabpanel" id="about" aria-labelledby="tab-about" hidden>
+      <header class="head">
+        <h1>About</h1>
+        <p>Where settings live, and what stays out of this window.</p>
+      </header>
+      <div class="card">
+        <div class="row">
+          <div class="label"><span>Config folder</span><small id="configDir" class="path"></small></div>
+          <div class="control"><button type="button" class="btn" id="openConfig">Open folder</button></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Only in the config files, on purpose</h2>
+        <p class="body-text">These protect you, so a window can't loosen them. Edit them in the config folder; Jarvis checks them at startup.</p>
+        <ul class="plain">
+          <li><b>Permission tiers and approvals</b> <span>permissions.yaml</span></li>
+          <li><b>Connected services</b> <span>mcp.yaml</span></li>
+          <li><b>Models for each tier</b> <span>models.yaml</span></li>
+          <li><b>Budget, task limits, allowed folders</b> <span>jarvis.yaml</span></li>
+        </ul>
+      </div>
+      <div class="card">
+        <h2>Shortcuts</h2>
+        <ul class="plain keys">
+          <li><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>L</kbd> <span>Talk</span></li>
+          <li><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>J</kbd> <span>Stop</span></li>
+          <li><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>M</kbd> <span>Mute or unmute</span></li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="settings.js"></script>
+</body>
+</html>

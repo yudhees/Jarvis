@@ -16,8 +16,25 @@
   --font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
   --mono: "Cascadia Mono", Consolas, ui-monospace, monospace;
 }
+/* Theme: Settings can force light or dark; "system" follows Windows. */
+:root[data-theme="dark"] {
+  --ink: #e8ecf3;
+  --muted: #9aa5b8;
+  --line: #2c374b;
+  --accent: #5b8fff;
+  --accent-ink: #0d1118;
+  --glow: #4fd8ff;
+  --amber: #f5b13d;
+  --danger: #ff6369;
+  --bot-shell: #dfe5ef;
+  --bot-edge: #8d98ab;
+  --visor: #0a0f19;
+  --bubble: #1b2230;
+  --chip: #262f40;
+  color-scheme: dark;
+}
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --ink: #e8ecf3;
     --muted: #9aa5b8;
     --line: #2c374b;
@@ -55,7 +72,7 @@ body {
 .bubble {
   position: absolute;
   right: 10px;
-  bottom: 178px;
+  bottom: calc(18px + 160px * var(--pet-scale, 1));
   width: 300px;
   max-height: 200px;
   overflow: hidden;
@@ -143,8 +160,8 @@ body {
   position: absolute;
   right: 12px;
   bottom: 8px;
-  width: 160px;
-  height: 160px;
+  width: calc(160px * var(--pet-scale, 1));
+  height: calc(160px * var(--pet-scale, 1));
   cursor: grab;
 }
 .pet.dragging {
@@ -553,4 +570,93 @@ body {
 }
 body.faded {
   opacity: 0;
+}
+
+/* ---------- Looks: robot (default), other characters, or the user's logo ---------- */
+.orb,
+.logo,
+.art {
+  display: none;
+}
+.a-shell {
+  fill: var(--bot-shell);
+  stroke: var(--bot-edge);
+  stroke-width: 2;
+}
+.a-face {
+  fill: var(--visor);
+}
+.a-inner {
+  fill: var(--glow);
+  opacity: 0.45;
+}
+.a-line {
+  stroke: var(--bot-edge);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  fill: none;
+}
+.a-knob {
+  fill: var(--bot-edge);
+}
+.a-glowline {
+  fill: var(--visor);
+  stroke: var(--glow);
+  stroke-width: 3;
+  stroke-linejoin: round;
+}
+.pet[data-look="cat"] .art-cat,
+.pet[data-look="bear"] .art-bear,
+.pet[data-look="ghost"] .art-ghost,
+.pet[data-look="tv"] .art-tv {
+  display: block;
+}
+.pet:is([data-look="cat"], [data-look="bear"], [data-look="ghost"], [data-look="tv"])
+  :is(.shell, .visor, .hand, .antenna, .antenna-light) {
+  display: none;
+}
+.pet[data-state="AWAITING_APPROVAL"] :is(.a-shell, .a-glowline) {
+  stroke: var(--amber);
+}
+.pet[data-state="MUTED"] .a-shell {
+  fill: var(--line);
+}
+.pet[data-state="MUTED"] .a-glowline {
+  stroke: var(--muted);
+}
+.orb {
+  fill: var(--visor);
+  stroke: var(--glow);
+  stroke-width: 3;
+}
+.logo {
+  transform-origin: 80px 84px;
+  transition:
+    transform 0.08s linear,
+    filter 0.3s;
+}
+.pet[data-look="orb"] .orb,
+.pet[data-look="logo"] .logo {
+  display: block;
+}
+.pet[data-look="orb"] :is(.shell, .visor, .hand, .antenna, .antenna-light),
+.pet[data-look="logo"]
+  :is(.shell, .visor, .hand, .antenna, .antenna-light, .eye, .lid, .cheek, .mouth, .spiral) {
+  display: none;
+}
+.pet[data-look="orb"][data-state="AWAITING_APPROVAL"] .orb {
+  stroke: var(--amber);
+}
+.pet[data-look="orb"][data-state="MUTED"] .orb {
+  stroke: var(--muted);
+}
+.pet[data-look="logo"][data-state="THINKING"] .logo {
+  transform: translateY(-4px);
+}
+.pet[data-look="logo"][data-state="MUTED"] .logo {
+  filter: grayscale(1);
+  opacity: 0.6;
+}
+.pet[data-look="logo"][data-state="SLEEPING"] .logo {
+  filter: saturate(0.6);
 }

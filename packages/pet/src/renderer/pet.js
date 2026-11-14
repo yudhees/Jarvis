@@ -14,6 +14,7 @@
   const bubbleText = $('bubbleText');
   const bubbleBadge = $('bubbleBadge');
   const bubbleSay = $('bubbleSay');
+  const logo = $('logo');
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   const SVG = 'http://www.w3.org/2000/svg';
@@ -220,7 +221,10 @@
         if (e.state === 'SLEEPING' || e.state === 'MUTED')
           hideBubble(e.state === 'MUTED' ? 0 : 6000);
         if (e.state !== 'LISTENING') ring.style.transform = '';
-        if (e.state !== 'SPEAKING') mouth.style.transform = '';
+        if (e.state !== 'SPEAKING') {
+          mouth.style.transform = '';
+          logo.style.transform = '';
+        }
         if (e.state === 'ERROR')
           setTimeout(() => {
             if (pet.dataset.state === 'ERROR') pet.dataset.state = 'SLEEPING';
@@ -232,6 +236,7 @@
         break;
       case 'speak_level':
         mouth.style.transform = `scaleY(${1 + e.level * 2.6})`;
+        if (pet.dataset.look === 'logo') logo.style.transform = `scale(${1 + e.level * 0.08})`;
         break;
       case 'transcript_partial':
         showBubble('You', e.text);
@@ -282,6 +287,30 @@
     }
   }
 
+  // ---------- look, theme and colors (from the Settings window) ----------
+  const root = document.documentElement;
+  const HEX = /^#[0-9a-f]{6}$/;
+  function setColor(name, value) {
+    if (typeof value === 'string' && HEX.test(value)) root.style.setProperty(name, value);
+    else root.style.removeProperty(name);
+  }
+  api.onAppearance((a) => {
+    if (!a || typeof a !== 'object') return;
+    root.dataset.theme = ['light', 'dark'].includes(a.theme) ? a.theme : 'system';
+    setColor('--accent', a.accent);
+    setColor('--accent-ink', a.accentInk);
+    setColor('--glow', a.glow);
+    const size = Number(a.size);
+    root.style.setProperty('--pet-scale', String(size >= 80 && size <= 125 ? size / 100 : 1));
+    const hasLogo = typeof a.logo === 'string' && a.logo.startsWith('data:image/png;base64,');
+    if (hasLogo) logo.setAttribute('href', a.logo);
+    else logo.removeAttribute('href');
+    const builtIn = ['robot', 'orb', 'cat', 'bear', 'ghost', 'tv'];
+    pet.dataset.look =
+      a.look === 'logo' && hasLogo ? 'logo' : builtIn.includes(a.look) ? a.look : 'robot';
+  });
+
+  // Registered after onAppearance: onEvent tells the main process the page is ready.
   api.onEvent(handle);
 
   // Fade out before the window hides; fade in when it comes back.

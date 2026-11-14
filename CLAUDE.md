@@ -590,6 +590,7 @@ Phase 1 (`npm start`, `npm run repl`):
 - Grounding system prompt (8).
 - `npm run learn-repl` (add `--local` without an API key) to try memory, learning, and routing by typing.
 - Questions in the pet (6.2): choice buttons or a text box, "or just say it", Skip, 30 s timeout; secret-looking questions refused; answers never count as approval. Remembered defaults so the same question stops being asked. Checked on screen: the question bubble with choices. Not tried by hand: clicking an answer and typing (covered by unit tests).
+- Settings window (tray > Settings…, `pet/src/main/settings-window.ts`): pet look (robot, orb, or your own PNG/JPEG logo, re-encoded to a 256 px PNG; optional tray icon), theme (system/light/dark), accent and glow colors, size; Windows voice and speed with a Play preview; wake word, strictness, end-of-sentence pause, follow-up window, barge-in; hide when idle, start with Windows, learning. Only an allow-list of jarvis.yaml keys can be written (`core/src/config/settings.ts`, guard-tested); permissions, approvals, budget, folders, services and models stay file-only. Core reloads jarvis.yaml on change: voice and listening timings apply at once, the rest after restart. Checked on screen: the window, orb look and violet accent reaching the pet, voice list. Not tried by hand: logo upload and the preview sound.
 - Hide pet and Hide when idle (default on, 8 s); the wake word and recording always bring the pet back.
 - Desktop pet, phase 4 app shell (`npm run pet`): Electron, transparent and always on top above the taskbar, click-through except the pet and bubble, draggable with remembered position, tray menu (mute, stop, demo, settings folder, start with Windows, quit), all states and the speech bubble. Main process runs TypeScript directly; the sandboxed preload and the window script are plain JS. Events from core are validated before display and shown with `textContent` only. Until core's WebSocket bridge exists it runs in demo mode (click the pet, or `JARVIS_PET_DEMO=1`). Checked on screen: window, badge, held tool icon, reply bubble, follow-up ring. Not yet seen on screen: the amber approval bubble (screen locked during capture). Still to do for phase 4: core's bridge server, hotkeys in core.
 - `packages/pet/preview/pet-preview.html`: the browser preview used to agree the look.
@@ -599,7 +600,19 @@ Phase 1 (`npm start`, `npm run repl`):
 
 Kept lightweight: Node 22.18+ runs the TypeScript directly (type stripping, no build step, no tsx), tests use the built-in `node:test`, and Biome is the only lint/format tool. Dev deps: `typescript`, `@types/node`, `@biomejs/biome`. Runtime deps: `zod`, `yaml`, `@anthropic-ai/sdk`, `@picovoice/pvrecorder-node`, `@picovoice/pvspeaker-node`, `@picovoice/porcupine-node` (4.0.2, 7 MB, prebuilt).
 
-Commands: `npm run check` (typecheck + lint + tests), `npm start`, `npm run repl` (`--speak`, `--local`), `npm run set-key`, `npm run mic-test`, `npm run speaker-test` (both take `--list` and `--device N`), `npm run stt-test`.
+Running Jarvis day to day:
+- **Supervisor:** `npm run jarvis` (scripts/supervisor.ts) keeps it running.
+  - It restarts Jarvis after a crash, waiting longer if it keeps failing.
+  - It reloads Jarvis about 1 s after any change under `packages/*/src` or `config/`. `jarvis.yaml` is applied live by core instead.
+  - It stops when the user picks "Quit Jarvis" in the tray.
+- **Start with Windows:** `npm run autostart -- on|off` adds a hidden launcher (`Startup\Jarvis.vbs`) that runs the supervisor at sign-in, logging to `%APPDATA%\jarvis\logs\jarvis.log`. The log starts fresh each time, one old copy is kept, and it's capped at 2 MB. Run it from your own terminal, not through the Claude app.
+- **Wake word:** the default is `keywords.provider: whisper`. While asleep, short bursts of speech are transcribed and checked for "(hey) Jarvis" (`afterWakeWord`, fuzzy for how Whisper writes it for different voices). The Windows recognizer heard the user's "Hey Jarvis" as "The tattoos".
+- **Only one Jarvis:** a lock on 127.0.0.1 port 48178 refuses a second core (48179 does the same for the supervisor). Helpers exit when core ends:
+  - the hotkey and keyword hosts when their stdin closes;
+  - the pet when its parent process is gone;
+  - leftovers from a crash are stopped at the next start.
+
+Commands: `npm run check` (typecheck + lint + tests), `npm run jarvis`, `npm run autostart`, `npm start`, `npm run repl` (`--speak`, `--local`), `npm run set-key`, `npm run mic-test`, `npm run speaker-test` (both take `--list` and `--device N`), `npm run stt-test`.
 
 What works:
 - npm workspaces `shared`, `core`, `pet` (pet is an empty placeholder until phase 4).

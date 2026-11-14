@@ -1,7 +1,26 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { CoreToPetEvent, JarvisState, PetToCoreEvent } from '@jarvis/shared';
-import { app, BrowserWindow, ipcMain, Menu, type Rectangle, screen, shell, Tray } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  ipcMain,
+  Menu,
+  type NativeImage,
+  nativeImage,
+  type Rectangle,
+  screen,
+  shell,
+  Tray,
+} from 'electron';
+import {
+  type Appearance,
+  checkLogoDataUrl,
+  DEFAULT_APPEARANCE,
+  inkFor,
+  parseAppearance,
+} from './appearance.ts';
 import { CoreLink } from './core-link.ts';
 import {
   DEMO_PROJECT_QUESTION,
@@ -13,6 +32,12 @@ import {
   playScript,
 } from './demo.ts';
 import { cleanAnswer } from './events.ts';
+import {
+  openSettings,
+  pushSettingsStatus,
+  registerSettingsIpc,
+  type SettingsDeps,
+} from './settings-window.ts';
 import { trayIcon } from './tray-icon.ts';
 import { type PetPrefs, parsePrefs, visibilityFor } from './visibility.ts';
 
@@ -27,7 +52,9 @@ const WIDTH = 340;
 const HEIGHT = 460;
 const MARGIN = 12;
 const SRC = path.resolve(import.meta.dirname, '..');
-const CONFIG_DIR = path.resolve(SRC, '..', '..', '..', 'config');
+const REPO_DIR = path.resolve(SRC, '..', '..', '..');
+const CONFIG_DIR = path.join(REPO_DIR, 'config');
+const CORE_START_TIMEOUT_MS = 45000;
 
 let win: BrowserWindow | undefined;
 let tray: Tray | undefined;
@@ -44,6 +71,10 @@ let prefs: PetPrefs = parsePrefs(undefined);
 let manuallyHidden = false;
 let hideTimer: NodeJS.Timeout | undefined;
 let petVisible = false;
+let appearance: Appearance = DEFAULT_APPEARANCE;
+let logo: string | null = null; // data URL of logo.png
+let settingsOpen = false;
+let coreStarting: NodeJS.Timeout | undefined;
 
 /** Where core's bridge is, from the environment core started us with. */
 function coreFromEnv(): { port: number; token: string } | undefined {
@@ -63,8 +94,27 @@ function parseCoreAddress(data: unknown): { port: number; token: string } | unde
   return { port, token };
 }
 
+// The pet no longer starts itself with Windows (Jarvis starts it); undo an
+// older setting that would put a lone pet on the desktop at sign-in.
+if (app.getLoginItemSettings().openAtLogin) app.setLoginItemSettings({ openAtLogin: false });
+
+// Started by core: if core ends without closing us (crash, closed terminal),
+// quit too, so no pet is left on the desktop with nothing behind it.
+if (coreFromEnv()) {
+  const core = process.ppid;
+  setInterval(() => {
+    try {
+      process.kill(core, 0); // only checks that it still exists
+    } catch {
+      app.quit();
+    }
+  }, 3000).unref();
+}
+
 // One pet at a time. A second copy started by a new core hands over the core
 // address, and this pet reconnects to it (see 'second-instance' below).
+// A separate profile lets a second copy run beside the real pet (screenshots, checks).
+if (process.env.JARVIS_PET_PROFILE) app.setPath('userData', process.env.JARVIS_PET_PROFILE);
 if (!app.requestSingleInstanceLock(coreFromEnv() ?? {})) app.quit();
 
 // Keep the pet light: it draws a few SVG shapes, so it needs no GPU process,
@@ -142,6 +192,139 @@ function savePrefs(): void {
   }
 }
 
+// ---------- appearance (Settings window): look, logo, theme, colors, size ----------
+
+const appearanceFile = () => path.join(app.getPath('userData'), 'pet-appearance.json');
+const logoFile = () => path.join(app.getPath('userData'), 'logo.png');
+const LOGO_MAX_SIDE = 256;
+
+function loadAppearance(): void {
+  try {
+    appearance = parseAppearance(JSON.parse(readFileSync(appearanceFile(), 'utf8')));
+  } catch {
+    appearance = DEFAULT_APPEARANCE;
+  }
+  try {
+    const png = nativeImage.createFromPath(logoFile());
+    logo = png.isEmpty() ? null : png.toDataURL();
+  } catch {
+    logo = null;
+  }
+  if (appearance.look === 'logo' && !logo) appearance = { ...appearance, look: 'robot' };
+}
+
+function saveAppearance(): void {
+  try {
+    writeFileSync(appearanceFile(), JSON.stringify(appearance));
+  } catch {
+    // keep going with in-memory settings
+  }
+}
+
+/** What the pet window needs to draw itself; colors already checked as #rrggbb. */
+function sendAppearance(): void {
+  win?.webContents.send('pet:appearance', {
+    look: appearance.look,
+    theme: appearance.theme,
+    accent: appearance.accent,
+    accentInk: appearance.accent ? inkFor(appearance.accent) : null,
+    glow: appearance.glow,
+    size: appearance.size,
+    logo: appearance.look === 'logo' ? logo : null,
+  });
+  updateTray();
+}
+
+/** Decodes a picked image and stores it as a fresh, small PNG (only pixels survive). */
+function storeLogo(dataUrl: unknown): { ok: true; logo: string } | { ok: false; error: string } {
+  const checked = checkLogoDataUrl(dataUrl);
+  if (!checked) return { ok: false, error: 'Pick a PNG or JPEG image under 2 MB.' };
+  let image = nativeImage.createFromDataURL(checked);
+  if (image.isEmpty()) return { ok: false, error: 'That image could not be read.' };
+  const { width, height } = image.getSize();
+  if (width < 16 || height < 16) return { ok: false, error: 'The image is too small.' };
+  if (Math.max(width, height) > LOGO_MAX_SIDE) {
+    image =
+      width >= height
+        ? image.resize({ width: LOGO_MAX_SIDE, quality: 'best' })
+        : image.resize({ height: LOGO_MAX_SIDE, quality: 'best' });
+  }
+  try {
+    writeFileSync(logoFile(), image.toPNG());
+  } catch (err) {
+    return { ok: false, error: `Could not save the logo: ${(err as Error).message}` };
+  }
+  logo = image.toDataURL();
+  appearance = { ...appearance, look: 'logo' };
+  saveAppearance();
+  sendAppearance();
+  return { ok: true, logo };
+}
+
+function removeLogo(): void {
+  rmSync(logoFile(), { force: true });
+  logo = null;
+  if (appearance.look === 'logo') appearance = { ...appearance, look: 'robot' };
+  saveAppearance();
+  sendAppearance();
+}
+
+function currentTrayIcon(isMuted: boolean): NativeImage {
+  if (!isMuted && logo && appearance.logoInTray) {
+    const image = nativeImage.createFromDataURL(logo);
+    if (!image.isEmpty()) return image.resize({ width: 32, height: 32, quality: 'best' });
+  }
+  return trayIcon(isMuted);
+}
+
+// ---------- starting and stopping Jarvis core (Settings window, tray) ----------
+
+type CoreStatus = 'running' | 'starting' | 'stopped';
+function coreStatus(): CoreStatus {
+  if (connected) return 'running';
+  return coreStarting ? 'starting' : 'stopped';
+}
+
+function statusChanged(): void {
+  updateTray();
+  pushSettingsStatus(coreStatus());
+}
+
+/**
+ * Starts core the same way `npm start` does, without a console window. Core
+ * then opens its own pet, which hands its address to this pet (one pet at a
+ * time), so this pet connects to it.
+ */
+function startCore(): void {
+  if (connected || coreStarting) return;
+  const done = () => {
+    clearTimeout(coreStarting);
+    coreStarting = undefined;
+    statusChanged();
+  };
+  coreStarting = setTimeout(done, CORE_START_TIMEOUT_MS);
+  try {
+    const child = spawn('node', [path.join('packages', 'core', 'src', 'main.ts')], {
+      cwd: REPO_DIR,
+      detached: true,
+      stdio: 'ignore', // core's console shows transcripts; nothing is written to disk
+      windowsHide: true,
+    });
+    child.once('error', done);
+    child.once('exit', done); // e.g. Jarvis was already running, or bad config
+    child.unref();
+  } catch {
+    done();
+    return;
+  }
+  statusChanged();
+}
+
+/** Asks core to quit (cancels any task first). The pet stays open. */
+function stopCore(): void {
+  if (connected) link?.send({ type: 'quit' });
+}
+
 // ---------- showing and hiding ----------
 
 function showPet(): void {
@@ -167,6 +350,11 @@ function hidePet(): void {
 }
 
 function applyVisibility(): void {
+  // While Settings is open the pet stays up, so changes can be seen on it.
+  if (settingsOpen) {
+    showPet();
+    return;
+  }
   const v = visibilityFor(state, manuallyHidden, prefs);
   if (v.action === 'show') {
     if (v.clearManualHide) manuallyHidden = false;
@@ -280,9 +468,9 @@ const STATE_LABEL: Record<JarvisState, string> = {
 function updateTray(): void {
   if (!tray) return;
   const isMuted = state === 'MUTED';
-  tray.setImage(trayIcon(isMuted));
+  tray.setImage(currentTrayIcon(isMuted));
   tray.setToolTip(`Jarvis: ${STATE_LABEL[state]}${connected ? '' : ' (demo)'}`);
-  const startWithWindows = app.getLoginItemSettings().openAtLogin;
+
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: `Jarvis: ${STATE_LABEL[state]}`, enabled: false },
@@ -295,6 +483,13 @@ function updateTray(): void {
         ? { label: 'Unmute', click: () => toCore({ type: 'unmute' }) }
         : { label: 'Mute', click: () => toCore({ type: 'mute' }) },
       { label: 'Stop current task', click: () => toCore({ type: 'stop' }) },
+      connected
+        ? { label: 'Stop Jarvis', click: stopCore }
+        : {
+            label: coreStarting ? 'Starting Jarvis…' : 'Start Jarvis',
+            enabled: !coreStarting,
+            click: startCore,
+          },
       { label: 'Play demo', enabled: !connected, click: playDemo },
       { type: 'separator' },
       petVisible
@@ -322,19 +517,14 @@ function updateTray(): void {
           applyVisibility();
         },
       },
-      { label: 'Settings (config folder)', click: () => void shell.openPath(CONFIG_DIR) },
-      {
-        label: 'Start with Windows',
-        type: 'checkbox',
-        checked: startWithWindows,
-        click: (item) => {
-          app.setLoginItemSettings({ openAtLogin: item.checked });
-          updateTray();
-        },
-      },
+      { label: 'Settings…', click: () => openSettings(settingsDeps) },
+      { label: 'Open config folder', click: () => void shell.openPath(CONFIG_DIR) },
+      // Jarvis (core) starts the pet; starting the pet alone would leave an icon
+      // with no Jarvis behind it. Set up with: npm run autostart -- on
+      { label: 'Start with Windows: npm run autostart -- on', enabled: false },
       { type: 'separator' },
       {
-        label: 'Quit pet',
+        label: connected ? 'Quit Jarvis' : 'Quit pet',
         click: () => {
           if (connected) link?.send({ type: 'quit' });
           app.quit();
@@ -420,6 +610,7 @@ ipcMain.on('pet:clicked', () => {
 });
 
 ipcMain.on('pet:ready', () => {
+  sendAppearance();
   show({ type: 'state', state });
   if (connected) return;
   if (process.env.JARVIS_PET_DEMO === '1') {
@@ -432,11 +623,48 @@ ipcMain.on('pet:ready', () => {
   });
 });
 
+const settingsDeps: SettingsDeps = {
+  srcDir: SRC,
+  configDir: CONFIG_DIR,
+  getAppearance: () => appearance,
+  setAppearance: (patch) => {
+    appearance = parseAppearance(patch, appearance);
+    if (appearance.look === 'logo' && !logo) appearance = { ...appearance, look: 'robot' };
+    saveAppearance();
+    sendAppearance();
+    return appearance;
+  },
+  getLogo: () => logo,
+  setLogo: storeLogo,
+  clearLogo: removeLogo,
+  getBehavior: () => ({ ...prefs, startWithWindows: app.getLoginItemSettings().openAtLogin }),
+  setBehavior: (patch) => {
+    const p = (patch && typeof patch === 'object' ? patch : {}) as Record<string, unknown>;
+    prefs = parsePrefs({ ...prefs, ...p });
+    savePrefs();
+    if (typeof p.startWithWindows === 'boolean') {
+      app.setLoginItemSettings({ openAtLogin: p.startWithWindows });
+    }
+    applyVisibility();
+    updateTray();
+  },
+  coreStatus,
+  startCore,
+  stopCore,
+  onOpenChange: (open) => {
+    settingsOpen = open;
+    if (open) manuallyHidden = false;
+    applyVisibility();
+  },
+};
+
 app.whenReady().then(() => {
   app.setAppUserModelId('Jarvis.Pet');
   loadPrefs();
+  loadAppearance();
+  registerSettingsIpc(settingsDeps);
   createWindow();
-  tray = new Tray(trayIcon(false));
+  tray = new Tray(currentTrayIcon(false));
   tray.on('click', () => tray?.popUpContextMenu());
   updateTray();
 
@@ -445,6 +673,7 @@ app.whenReady().then(() => {
 
   const core = coreFromEnv();
   if (core) connectCore(core);
+  if (process.env.JARVIS_PET_SETTINGS === '1') openSettings(settingsDeps); // for screenshots
 });
 
 function connectCore(core: { port: number; token: string }): void {
@@ -454,8 +683,12 @@ function connectCore(core: { port: number; token: string }): void {
     onEvent: show,
     onStatus: (up) => {
       connected = up;
-      if (up) stopDemo?.();
-      updateTray();
+      if (up) {
+        stopDemo?.();
+        clearTimeout(coreStarting);
+        coreStarting = undefined;
+      }
+      statusChanged();
     },
   });
   link.start();

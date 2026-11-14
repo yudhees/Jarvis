@@ -31,7 +31,7 @@ type HostMessage =
  * starts once (lazily) and is restarted only if it dies.
  */
 export class WindowsSapiTts implements TtsProvider {
-  private readonly options: WindowsSapiOptions;
+  private options: WindowsSapiOptions;
   private proc: ChildProcessWithoutNullStreams | undefined;
   private ready: Promise<string[]> | undefined;
   private readonly pending = new Map<number, Pending>();
@@ -40,6 +40,11 @@ export class WindowsSapiTts implements TtsProvider {
 
   constructor(options: WindowsSapiOptions) {
     this.options = options;
+  }
+
+  /** Changes the voice for the next sentence (Settings window, jarvis.yaml reload). */
+  setVoice(voice: string | null, rate: number): void {
+    this.options = { ...this.options, voice, rate };
   }
 
   /** Installed, enabled voice names. */

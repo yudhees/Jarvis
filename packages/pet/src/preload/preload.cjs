@@ -12,6 +12,10 @@ contextBridge.exposeInMainWorld('jarvisPet', {
   onVisibility(callback) {
     ipcRenderer.on('pet:visibility', (_event, visible) => callback(visible === true));
   },
+  /** Look, theme, colors and size from the Settings window (checked in the main process). */
+  onAppearance(callback) {
+    ipcRenderer.on('pet:appearance', (_event, data) => callback(data));
+  },
   /** true while the pointer is over the pet or its bubble, so the rest stays click-through. */
   setInteractive(on) {
     ipcRenderer.send('pet:interactive', on === true);
