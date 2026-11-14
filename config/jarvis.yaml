@@ -44,3 +44,22 @@ retention:
 learning:
   enabled: true
   aboutUserTokenCap: 300
+
+# Claude Code skills installed on this PC (~/.claude/skills and plugins) that
+# Jarvis may follow. Only the best matches for a request are loaded.
+skills:
+  enabled: true
+  maxPerRequest: 2
+  # Skills about operating Claude Code itself; not useful for a voice assistant.
+  exclude:
+    - using-superpowers
+    - diagnosing-superpowers
+    - writing-skills
+    - skill-creator
+    - find-skills
+    - import-memory
+    - using-git-worktrees
+  # Folders with your own .md instruction files (Jira review, task creation,
+  # moving tickets, Slack updates, ...). Every .md inside is offered as a skill.
+  # Example: - "D:/Work/claude-prompts"
+  extraDirs: []

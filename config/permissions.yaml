@@ -2,4 +2,62 @@
 #   0 read-only, 1 low-risk/reversible, 2 spoken approval,
 #   3 spoken approval + confirmation code, 4 forbidden.
 # Any tool NOT listed here is treated as tier 2. That default is fixed in code.
-tools: {}
+# MCP tools are named mcp__<server name in mcp.yaml>__<tool name>.
+tools:
+  # --- Jira / Confluence (Atlassian MCP) ---
+  mcp__atlassian__getAccessibleAtlassianResources: 0
+  mcp__atlassian__atlassianUserInfo: 0
+  mcp__atlassian__getVisibleJiraProjects: 0
+  mcp__atlassian__getJiraIssue: 0
+  mcp__atlassian__searchJiraIssuesUsingJql: 0
+  mcp__atlassian__getTransitionsForJiraIssue: 0
+  mcp__atlassian__getJiraIssueRemoteIssueLinks: 0
+  mcp__atlassian__lookupJiraAccountId: 0
+  mcp__atlassian__getJiraProjectIssueTypesMetadata: 0
+  mcp__atlassian__getJiraIssueTypeMetaWithFields: 0
+  mcp__atlassian__getIssueLinkTypes: 0
+  mcp__atlassian__search: 0
+  mcp__atlassian__fetch: 0
+  mcp__atlassian__getConfluencePage: 0
+  mcp__atlassian__searchConfluenceUsingCql: 0
+  mcp__atlassian__createJiraIssue: 2 # "create a ticket"
+  mcp__atlassian__editJiraIssue: 2
+  mcp__atlassian__transitionJiraIssue: 2 # "move the ticket to In Review"
+  mcp__atlassian__addCommentToJiraIssue: 2
+  mcp__atlassian__addWorklogToJiraIssue: 2
+  mcp__atlassian__createIssueLink: 2 # link a commit/PR or another issue
+  mcp__atlassian__createConfluencePage: 2
+  mcp__atlassian__updateConfluencePage: 2
+
+  # --- MongoDB (MongoDB Atlas MCP; read-only tools) ---
+  mcp__mongodb-atlas__list-databases: 0
+  mcp__mongodb-atlas__list-collections: 0
+  mcp__mongodb-atlas__collection-schema: 0
+  mcp__mongodb-atlas__collection-indexes: 0
+  mcp__mongodb-atlas__collection-storage-size: 0
+  mcp__mongodb-atlas__db-stats: 0
+  mcp__mongodb-atlas__find: 0
+  mcp__mongodb-atlas__count: 0
+  mcp__mongodb-atlas__aggregate: 0
+  mcp__mongodb-atlas__explain: 0
+  mcp__mongodb-atlas__atlas-list-clusters: 0
+  mcp__mongodb-atlas__atlas-inspect-cluster: 0
+  mcp__mongodb-atlas__atlas-get-performance-advisor: 0
+  mcp__mongodb-atlas__atlas-list-alerts: 0
+  mcp__mongodb-atlas__search-knowledge: 0
+
+  # --- Browser (Playwright MCP). Verify tool names when enabling (section 17). ---
+  mcp__browser__browser_navigate: 1
+  mcp__browser__browser_navigate_back: 1
+  mcp__browser__browser_snapshot: 0
+  mcp__browser__browser_take_screenshot: 0
+  mcp__browser__browser_tabs: 1
+  mcp__browser__browser_wait_for: 0
+  mcp__browser__browser_close: 1
+  mcp__browser__browser_click: 2
+  mcp__browser__browser_type: 2
+  mcp__browser__browser_fill_form: 2
+  mcp__browser__browser_select_option: 2
+  mcp__browser__browser_press_key: 2
+  mcp__browser__browser_file_upload: 3
+  mcp__browser__browser_evaluate: 3 # runs JavaScript in the page

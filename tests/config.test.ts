@@ -37,7 +37,8 @@ describe('loadConfig', () => {
     const config = loadConfig(realDir);
     assert.equal(config.models.tiers.simple, 'claude-haiku-5-5');
     assert.equal(config.jarvis.audio.sampleRate, 16000);
-    assert.deepEqual(config.permissions.tools, {});
+    assert.equal(config.permissions.tools['mcp__atlassian__transitionJiraIssue'], 2);
+    assert.equal(config.permissions.tools['mcp__mongodb-atlas__find'], 0);
     assert.ok(!config.jarvis.dataDir.includes('%'), 'dataDir should be expanded');
   });
 

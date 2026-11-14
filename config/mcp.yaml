@@ -1,8 +1,20 @@
-# MCP servers to connect (CLAUDE.md section 4). Decided before phase 3.
-# Example:
-#   slack:
-#     type: stdio
-#     command: npx
-#     args: ["-y", "some-slack-mcp@1.2.3"]
-#     enabled: false
-servers: {}
+# MCP servers Jarvis connects to (CLAUDE.md section 4). Each server's tools get
+# risk tiers in permissions.yaml; unlisted tools need spoken approval.
+#
+# These mirror the servers your Claude Code plugins use (found by
+# discoverMcpServers()). Remote servers need a one-time sign-in by Jarvis itself
+# (phase 3); until then they stay disabled.
+servers:
+  atlassian: # Jira and Confluence: search, create, move (transition), comment, link
+    type: http
+    url: https://mcp.atlassian.com/v2/mcp
+    enabled: false
+  mongodb-atlas: # read-only queries, schema, indexes, performance advice
+    type: http
+    url: https://mcp.mongodb.com/
+    enabled: false
+  browser: # Jarvis's own browser (Claude in Chrome is not available to apps)
+    type: stdio
+    command: npx
+    args: ["-y", "@playwright/mcp@0.0.83"]
+    enabled: false

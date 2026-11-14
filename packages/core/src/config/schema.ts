@@ -87,6 +87,12 @@ export const jarvisSchema = z.strictObject({
     enabled: z.boolean(),
     aboutUserTokenCap: positiveInt,
   }),
+  skills: z.strictObject({
+    enabled: z.boolean(),
+    maxPerRequest: z.int().min(0).max(5),
+    exclude: z.array(z.string().min(1)),
+    extraDirs: z.array(z.string().min(1)),
+  }),
 });
 
 export type ModelsConfig = z.infer<typeof modelsSchema>;
