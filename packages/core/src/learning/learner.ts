@@ -44,12 +44,14 @@ export type LearnResult =
 export type Observation =
   | { type: 'forced_model'; kind: RequestKind; tier: ModelTier }
   | { type: 'feedback'; kind: RequestKind; tier: ModelTier; signal: 'too_slow' | 'too_weak' }
-  | { type: 'request'; kind: RequestKind; at: Date };
+  | { type: 'request'; kind: RequestKind; at: Date }
+  /** The user answered a question Jarvis asked; topic names the question, like 'jira.project'. */
+  | { type: 'answer'; topic: string; value: string };
 
 type ProposalState = 'open' | 'asked' | 'accepted' | 'declined';
 
 interface StoredProposal {
-  kind: 'routing' | 'habit';
+  kind: 'routing' | 'habit' | 'default';
   key: string;
   payload: string;
   question: string;
@@ -96,6 +98,15 @@ function spokenItem(m: Memory): string {
   if (m.kind === 'vocabulary') return `"${m.key}" means ${m.value}`;
   if (m.key === null) return toSecondPerson(text);
   return text;
+}
+
+/** "jira.project" -> "the Jira project". */
+function topicLabel(topic: string): string {
+  const words = topic.split(/[._-]+/).filter(Boolean);
+  const named = words.map((w) =>
+    w === 'jira' ? 'Jira' : w === 'slack' ? 'Slack' : w === 'github' ? 'GitHub' : w,
+  );
+  return `the ${named.join(' ')}`;
 }
 
 function capitalize(text: string): string {
@@ -229,7 +240,20 @@ export class Learner {
     const st = this.state.value;
     let candidate: Omit<StoredProposal, 'state' | 'created'> | undefined;
 
-    if (obs.type === 'request') {
+    if (obs.type === 'answer') {
+      const value = obs.value.trim();
+      if (!value || this.defaultAnswer(obs.topic) === value) return this.nextProposal();
+      const signalKey = `answer|${obs.topic}|${value}`;
+      st.signals[signalKey] = (st.signals[signalKey] ?? 0) + 1;
+      if (st.signals[signalKey] >= this.options.proposalThreshold) {
+        candidate = {
+          kind: 'default',
+          key: obs.topic,
+          payload: value,
+          question: `You've picked ${value} for ${topicLabel(obs.topic)} a few times. Should I use it by default and stop asking?`,
+        };
+      }
+    } else if (obs.type === 'request') {
       if (obs.kind === 'chat') return undefined;
       const key = `${obs.kind}@${slotOf(obs.at)}`;
       const day = obs.at.toISOString().slice(0, 10);
@@ -319,9 +343,32 @@ export class Learner {
         source: 'user_confirmed',
       });
       reply = "Okay. I'll set it up as a routine once reminders are available.";
+    } else if (accepted && p.kind === 'default') {
+      try {
+        await this.memory.save({
+          kind: 'preference',
+          key: `default:${p.key}`,
+          value: p.payload,
+          text: `Default for ${topicLabel(p.key)}: ${p.payload}.`,
+          source: 'user_confirmed',
+        });
+        reply = `Okay. I'll use ${p.payload} for ${topicLabel(p.key)} without asking. Say otherwise any time.`;
+      } catch (err) {
+        if (!(err instanceof SensitiveContentError)) throw err;
+        reply = "I can't keep that one as a default.";
+      }
     }
     await this.save();
     return reply;
+  }
+
+  /**
+   * A remembered answer, so Jarvis can skip a question (CLAUDE.md 13.1). Core
+   * calls this before asking; when it returns a value it uses it and mentions it
+   * ("I'll put it in PROJ") instead of asking.
+   */
+  defaultAnswer(topic: string): string | undefined {
+    return this.memory.findByKey('preference', `default:${topic}`)?.value ?? undefined;
   }
 
   /** Learned routing per request kind, for the router. */

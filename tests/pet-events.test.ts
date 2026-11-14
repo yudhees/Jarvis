@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { demoScript } from '../packages/pet/src/main/demo.ts';
+import { demoFinish, demoScript } from '../packages/pet/src/main/demo.ts';
 import { parseCoreEvent } from '../packages/pet/src/main/events.ts';
 
 describe('parseCoreEvent (what the pet accepts from core)', () => {
@@ -35,8 +35,13 @@ describe('parseCoreEvent (what the pet accepts from core)', () => {
     for (const raw of bad) assert.equal(parseCoreEvent(raw), null, JSON.stringify(raw));
   });
 
-  it('the demo script only uses events the pet accepts, and ends asleep', () => {
-    const steps = demoScript();
+  it('the demo only uses events the pet accepts, stops to ask, and ends asleep', () => {
+    const first = demoScript().filter((s) => 'event' in s);
+    assert.equal(
+      first.at(-1) && 'event' in first.at(-1)! ? first.at(-1)!.event.type : '',
+      'input_request',
+    );
+    const steps = demoFinish('PROJ · Platform', 'Login times out');
     for (const step of steps) {
       if ('event' in step) assert.ok(parseCoreEvent(step.event), JSON.stringify(step.event));
     }

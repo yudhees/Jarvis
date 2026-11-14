@@ -5,6 +5,7 @@ export const STATES = [
   'LISTENING',
   'THINKING',
   'AWAITING_APPROVAL',
+  'AWAITING_INPUT',
   'SPEAKING',
   'FOLLOW_UP',
   'MUTED',
@@ -30,7 +31,27 @@ export type CoreToPetEvent =
   | { type: 'approval_result'; id: string; approved: boolean }
   | { type: 'model_selected'; tier: ModelTier; speed: Speed; model: string }
   | { type: 'budget'; usedFraction: number }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  | InputRequest
+  | { type: 'input_closed'; id: string };
+
+/**
+ * Jarvis needs something to continue (a choice, a name, a title). The user can
+ * answer by voice, by clicking a choice, or by typing in the pet. Never used for
+ * approvals (voice only, section 9) and never for passwords or keys.
+ */
+export interface InputRequest {
+  type: 'input_request';
+  id: string;
+  question: string;
+  /** 'choice' shows buttons from `options`; 'text' shows a text box. */
+  mode: 'choice' | 'text';
+  options?: string[];
+  placeholder?: string;
+}
+
+/** Limits shared by core (when asking) and the pet (when checking). */
+export const INPUT_LIMITS = { maxOptions: 6, maxOptionLength: 60, maxAnswerLength: 500 } as const;
 
 /** First message from the pet on the local WebSocket. Core closes the socket if the token is wrong. */
 export interface PetHello {
@@ -52,11 +73,19 @@ export const CORE_TO_PET_TYPES = [
   'model_selected',
   'budget',
   'error',
+  'input_request',
+  'input_closed',
 ] as const;
 
-/** Pet -> core. There is deliberately no `approve`: approval is voice only. */
+/**
+ * Pet -> core. There is deliberately no `approve`: approval is voice only.
+ * An input_reply is treated like the user's own words: it can answer a question,
+ * but core never counts it as an approval.
+ */
 export type PetToCoreEvent =
   | { type: 'stop' }
   | { type: 'mute' }
   | { type: 'unmute' }
-  | { type: 'quit' };
+  | { type: 'quit' }
+  | { type: 'input_reply'; id: string; value: string }
+  | { type: 'input_cancel'; id: string };

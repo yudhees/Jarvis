@@ -102,7 +102,9 @@
     bubbleBadge.hidden = !badge;
     bubbleBadge.textContent = badge || '';
     bubble.classList.toggle('approval', approval);
+    bubble.classList.remove('asking');
     bubbleSay.hidden = true;
+    if (!asking) askForm.hidden = true;
     bubble.classList.remove('hidden');
     if (!typed || reducedMotion) {
       bubbleText.textContent = text;
@@ -119,9 +121,70 @@
 
   function hideBubble(after = 6000) {
     clearTimeout(hideTimer);
-    if (approvalOpen) return; // approval text stays until answered (CLAUDE.md 11)
+    // Approval text and open questions stay until answered (CLAUDE.md 11).
+    if (approvalOpen || asking) return;
     hideTimer = setTimeout(() => bubble.classList.add('hidden'), after);
   }
+
+  // ---------- questions: answer by clicking, typing, or just saying it ----------
+  const askForm = $('ask');
+  const choices = $('choices');
+  const typed = $('typed');
+  const answerInput = $('answer');
+  let asking = null; // id of the open question
+
+  function showQuestion(e) {
+    asking = e.id;
+    showBubble('Question', e.question);
+    bubble.classList.add('asking');
+    choices.replaceChildren();
+    const isChoice = e.mode === 'choice';
+    choices.hidden = !isChoice;
+    typed.hidden = isChoice;
+    if (isChoice) {
+      for (const option of e.options) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = option;
+        b.addEventListener('click', () => answer(option));
+        choices.append(b);
+      }
+    } else {
+      answerInput.value = '';
+      answerInput.placeholder = e.placeholder || 'Type your answer';
+    }
+    askForm.hidden = false;
+  }
+
+  function closeQuestion() {
+    asking = null;
+    askForm.hidden = true;
+    bubble.classList.remove('asking');
+    hideBubble(1500);
+  }
+
+  function answer(value) {
+    if (!asking || !value.trim()) return;
+    const id = asking;
+    closeQuestion();
+    showBubble('You', value);
+    hideBubble(4000);
+    api.reply(id, value);
+  }
+
+  askForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    answer(answerInput.value);
+  });
+  answerInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') $('skip').click();
+  });
+  $('skip').addEventListener('click', () => {
+    if (!asking) return;
+    const id = asking;
+    closeQuestion();
+    api.cancelInput(id);
+  });
 
   function showApproval(e) {
     approvalOpen = true;
@@ -210,10 +273,21 @@
         showBubble('Jarvis', e.message);
         hideBubble(5000);
         break;
+      case 'input_request':
+        showQuestion(e);
+        break;
+      case 'input_closed':
+        if (asking === e.id) closeQuestion();
+        break;
     }
   }
 
   api.onEvent(handle);
+
+  // Fade out before the window hides; fade in when it comes back.
+  api.onVisibility((visible) => {
+    document.body.classList.toggle('faded', !visible);
+  });
 
   // ---------- click-through: only the pet and a visible bubble take the mouse ----------
   let interactive = false;

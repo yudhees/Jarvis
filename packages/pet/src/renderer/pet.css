@@ -440,3 +440,117 @@ body {
     transition: none !important;
   }
 }
+
+/* ---------- Questions (AWAITING_INPUT) ---------- */
+.ask {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ask[hidden],
+.choices[hidden],
+.typed[hidden] {
+  display: none;
+}
+.choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.choices button,
+.send {
+  font: 600 13px var(--font);
+  color: var(--ink);
+  background: var(--chip);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.choices button:hover,
+.send:hover {
+  border-color: var(--accent);
+}
+.send {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+.typed {
+  display: flex;
+  gap: 6px;
+}
+.typed input {
+  flex: 1;
+  min-width: 0;
+  font: 14px var(--font);
+  color: var(--ink);
+  background: var(--chip);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 9px;
+  user-select: text;
+}
+.ask-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+.link {
+  font: 12px var(--font);
+  color: var(--muted);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.bubble.asking {
+  border: 2px solid var(--accent);
+  max-height: 260px;
+}
+.bubble.asking::after {
+  border-right: 2px solid var(--accent);
+  border-bottom: 2px solid var(--accent);
+}
+
+.qmark {
+  display: none;
+  font: 700 22px var(--font);
+  fill: var(--accent);
+}
+.pet[data-state="AWAITING_INPUT"] .qmark {
+  display: block;
+  animation: bob 1.6s ease-in-out infinite;
+}
+.pet[data-state="AWAITING_INPUT"] .body {
+  transform: rotate(-6deg);
+}
+.pet[data-state="AWAITING_INPUT"] .eye {
+  transform: translate(3px, -3px);
+}
+@keyframes bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+/* ---------- Hide and show ---------- */
+body {
+  transition: opacity 0.3s;
+}
+body.faded {
+  opacity: 0;
+}

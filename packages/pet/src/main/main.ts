@@ -3,17 +3,28 @@ import path from 'node:path';
 import type { CoreToPetEvent, JarvisState, PetToCoreEvent } from '@jarvis/shared';
 import { app, BrowserWindow, ipcMain, Menu, type Rectangle, screen, shell, Tray } from 'electron';
 import { CoreLink } from './core-link.ts';
-import { demoScript, playScript } from './demo.ts';
+import {
+  DEMO_PROJECT_QUESTION,
+  DEMO_TITLE_QUESTION,
+  demoFinish,
+  demoNoAnswer,
+  demoScript,
+  demoTitleQuestion,
+  playScript,
+} from './demo.ts';
+import { cleanAnswer } from './events.ts';
 import { trayIcon } from './tray-icon.ts';
+import { type PetPrefs, parsePrefs, visibilityFor } from './visibility.ts';
 
 /**
  * The Jarvis pet (CLAUDE.md 11): a small transparent window that sits above the
  * taskbar, shows what Jarvis is doing, and never takes focus. It only displays
- * events; the one thing it sends to core is stop / mute / unmute / quit.
+ * events. It sends core only stop / mute / unmute / quit and answers to questions
+ * (input_reply / input_cancel), which core never treats as approvals.
  */
 
 const WIDTH = 340;
-const HEIGHT = 400;
+const HEIGHT = 460;
 const MARGIN = 12;
 const SRC = path.resolve(import.meta.dirname, '..');
 const CONFIG_DIR = path.resolve(SRC, '..', '..', '..', 'config');
@@ -26,6 +37,13 @@ let state: JarvisState = 'SLEEPING';
 let muted = false;
 let stopDemo: (() => void) | undefined;
 let dragTimer: NodeJS.Timeout | undefined;
+let openInput: string | undefined;
+let inputTimer: NodeJS.Timeout | undefined;
+let demoProject = '';
+let prefs: PetPrefs = parsePrefs(undefined);
+let manuallyHidden = false;
+let hideTimer: NodeJS.Timeout | undefined;
+let petVisible = false;
 
 if (!app.requestSingleInstanceLock()) app.quit();
 
@@ -74,12 +92,91 @@ function keepOnScreen(): void {
   win.setPosition(p.x, p.y);
 }
 
+// ---------- pet settings (hide when idle) ----------
+
+const prefsFile = () => path.join(app.getPath('userData'), 'pet-settings.json');
+
+function loadPrefs(): void {
+  try {
+    prefs = parsePrefs(JSON.parse(readFileSync(prefsFile(), 'utf8')));
+  } catch {
+    prefs = parsePrefs(undefined);
+  }
+}
+
+function savePrefs(): void {
+  try {
+    writeFileSync(prefsFile(), JSON.stringify(prefs));
+  } catch {
+    // keep going with in-memory settings
+  }
+}
+
+// ---------- showing and hiding ----------
+
+function showPet(): void {
+  clearTimeout(hideTimer);
+  if (!win) return;
+  if (!petVisible) {
+    petVisible = true;
+    win.showInactive();
+    win.webContents.send('pet:visibility', true);
+  }
+  updateTray();
+}
+
+function hidePet(): void {
+  clearTimeout(hideTimer);
+  if (!win || !petVisible) return;
+  petVisible = false;
+  win.webContents.send('pet:visibility', false); // fade out first
+  hideTimer = setTimeout(() => {
+    if (!petVisible) win?.hide();
+  }, 350);
+  updateTray();
+}
+
+function applyVisibility(): void {
+  const v = visibilityFor(state, manuallyHidden, prefs);
+  if (v.action === 'show') {
+    if (v.clearManualHide) manuallyHidden = false;
+    showPet();
+  } else if (v.action === 'hide') {
+    hidePet();
+  } else {
+    showPet();
+    hideTimer = setTimeout(hidePet, v.afterMs);
+  }
+}
+
+// ---------- questions from Jarvis (input requests) ----------
+
+function closeInput(): void {
+  clearTimeout(inputTimer);
+  openInput = undefined;
+  // Typing needs focus; outside a question the pet never takes focus.
+  win?.setFocusable(false);
+}
+
 // ---------- events into the window ----------
 
 function show(event: CoreToPetEvent): void {
   if (event.type === 'state') {
     state = event.state;
+    if (state !== 'AWAITING_INPUT' && openInput) closeInput();
+    applyVisibility();
     updateTray();
+  } else if (event.type === 'input_request') {
+    openInput = event.id;
+    // Focusable, but not focused: clicking the text box gives it focus, so the
+    // pet never steals the keyboard from what the user is doing.
+    win?.setFocusable(true);
+    if (!connected) {
+      clearTimeout(inputTimer);
+      inputTimer = setTimeout(() => demoAnswerTimeout(event.id), 30000);
+    }
+  } else if (event.type === 'input_closed' && event.id === openInput) {
+    closeInput();
   }
   win?.webContents.send('pet:event', event);
 }
@@ -87,7 +184,16 @@ function show(event: CoreToPetEvent): void {
 function toCore(event: PetToCoreEvent): void {
   if (connected && link?.send(event)) return;
   // Demo mode: act locally.
-  if (event.type === 'stop') {
+  if (event.type === 'input_reply') {
+    demoAnswer(event.id, event.value);
+  } else if (event.type === 'input_cancel') {
+    stopDemo?.();
+    closeInput();
+    show({ type: 'input_closed', id: event.id });
+    show({ type: 'reply_text', text: 'Okay, stopped. Nothing was created.' });
+    show({ type: 'state', state: 'SLEEPING' });
+  } else if (event.type === 'stop') {
+    closeInput();
     stopDemo?.();
     stopDemo = undefined;
     show({ type: 'state', state: muted ? 'MUTED' : 'SLEEPING' });
@@ -104,8 +210,27 @@ function toCore(event: PetToCoreEvent): void {
 function playDemo(): void {
   if (connected) return;
   stopDemo?.();
+  closeInput();
   muted = false;
   stopDemo = playScript(demoScript(), show);
+}
+
+function demoAnswer(id: string, value: string): void {
+  closeInput();
+  stopDemo?.();
+  if (id === DEMO_PROJECT_QUESTION) {
+    demoProject = value;
+    stopDemo = playScript(demoTitleQuestion(value), show);
+  } else if (id === DEMO_TITLE_QUESTION) {
+    stopDemo = playScript(demoFinish(demoProject || 'PROJ', value), show);
+  }
+}
+
+function demoAnswerTimeout(id: string): void {
+  if (openInput !== id) return;
+  closeInput();
+  stopDemo?.();
+  stopDemo = playScript(demoNoAnswer(id), show);
 }
 
 // ---------- tray ----------
@@ -115,6 +240,7 @@ const STATE_LABEL: Record<JarvisState, string> = {
   LISTENING: 'Listening',
   THINKING: 'Thinking',
   AWAITING_APPROVAL: 'Waiting for your OK',
+  AWAITING_INPUT: 'Waiting for your answer',
   SPEAKING: 'Speaking',
   FOLLOW_UP: 'Listening for a follow-up',
   MUTED: 'Muted',
@@ -141,9 +267,30 @@ function updateTray(): void {
       { label: 'Stop current task', click: () => toCore({ type: 'stop' }) },
       { label: 'Play demo', enabled: !connected, click: playDemo },
       { type: 'separator' },
+      petVisible
+        ? {
+            label: 'Hide pet',
+            click: () => {
+              manuallyHidden = true;
+              applyVisibility();
+            },
+          }
+        : {
+            label: 'Show pet',
+            click: () => {
+              manuallyHidden = false;
+              applyVisibility();
+            },
+          },
       {
-        label: 'Show or hide pet',
-        click: () => (win?.isVisible() ? win.hide() : win?.showInactive()),
+        label: 'Hide when idle',
+        type: 'checkbox',
+        checked: prefs.hideWhenIdle,
+        click: (item) => {
+          prefs = { ...prefs, hideWhenIdle: item.checked };
+          savePrefs();
+          applyVisibility();
+        },
       },
       { label: 'Settings (config folder)', click: () => void shell.openPath(CONFIG_DIR) },
       {
@@ -199,7 +346,7 @@ function createWindow(): void {
   win.setIgnoreMouseEvents(true, { forward: true });
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (e) => e.preventDefault());
-  win.once('ready-to-show', () => win?.showInactive());
+  win.once('ready-to-show', () => applyVisibility());
   void win.loadFile(path.join(SRC, 'renderer', 'index.html'));
 }
 
@@ -225,6 +372,19 @@ ipcMain.on('pet:drag-end', () => {
   savePosition();
 });
 
+ipcMain.on('pet:input-reply', (_e, id: unknown, value: unknown) => {
+  const answer = cleanAnswer(id, value);
+  if (!answer || answer.id !== openInput) return;
+  closeInput();
+  toCore({ type: 'input_reply', id: answer.id, value: answer.value });
+});
+
+ipcMain.on('pet:input-cancel', (_e, id: unknown) => {
+  if (typeof id !== 'string' || id !== openInput) return;
+  closeInput();
+  toCore({ type: 'input_cancel', id });
+});
+
 ipcMain.on('pet:clicked', () => {
   if (!connected && (state === 'SLEEPING' || state === 'MUTED')) playDemo();
 });
@@ -244,6 +404,7 @@ ipcMain.on('pet:ready', () => {
 
 app.whenReady().then(() => {
   app.setAppUserModelId('Jarvis.Pet');
+  loadPrefs();
   createWindow();
   tray = new Tray(trayIcon(false));
   tray.on('click', () => tray?.popUpContextMenu());
@@ -269,7 +430,10 @@ app.whenReady().then(() => {
   }
 });
 
-app.on('second-instance', () => win?.showInactive());
+app.on('second-instance', () => {
+  manuallyHidden = false;
+  showPet();
+});
 app.on('before-quit', () => {
   savePosition();
   link?.stop();

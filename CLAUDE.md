@@ -135,6 +135,7 @@ One state at a time. Every transition is sent to the pet.
 | `LISTENING` | Recording the user | Silence detected, or 15 s cap |
 | `THINKING` | Routing, model call, tool calls | Reply ready, approval needed, or error |
 | `AWAITING_APPROVAL` | Jarvis asked a yes/no question | Approve, cancel, or 20 s timeout (timeout = cancel) |
+| `AWAITING_INPUT` | Jarvis needs one missing detail to continue (see 6.2) | Answered by voice, a clicked choice, or typed text; skipped; or 30 s timeout (task stops, nothing changed) |
 | `SPEAKING` | Playing the reply | Playback ends, or the stop keyword is heard |
 | `FOLLOW_UP` | 8 s window where the user can reply without the wake word | Speech starts, or window ends |
 | `MUTED` | Mic fully off, set by tray, hotkey, or voice | User unmutes with the hotkey or tray |
@@ -153,6 +154,22 @@ The keyword spotter (Porcupine) only knows fixed keywords; it cannot understand 
    - "Jarvis, mute": go to `MUTED`. Unmute needs the hotkey or tray, because the mic is off.
    - "Jarvis, use Opus / Sonnet / Haiku": force the model for the next request.
    - "Jarvis, what are you doing?": read out the current task and last tool call.
+
+### 6.2 Asking for missing details (`AWAITING_INPUT`)
+
+Jarvis asks only when it has to. Before asking, in order:
+
+1. Use what the request already says, and what the conversation already settled.
+2. Use a remembered default for that question (`Learner.defaultAnswer(topic)`, 13.1), and say which one it used ("I'll put it in PROJ").
+3. Use a safe, obvious default when one exists (for example, the only Jira project the user can see).
+4. Only then ask, with at most one question at a time and, where possible, a short list of choices.
+
+Rules:
+
+- A question is never an approval. Answers (spoken, clicked, or typed) fill in details only; the action still needs the voice approval of section 9. The pet has no way to send `approve`.
+- Never ask for passwords, keys, codes, or card numbers. The pet also refuses to show a question that looks like one.
+- Each question has a stable `topic` (like `jira.project`). Every answer is reported to the learner, so the same answer twice becomes an offer to remember it as a default (13.1).
+- Answers are the user's own words: typed text is treated like a transcript and goes through the same limits (500 characters).
 
 ## 7. Model routing
 
@@ -345,6 +362,7 @@ State to animation:
 | `THINKING` | Looks up, small spinning dots; label shows the model in use (H, S, or O) |
 | Tool running | Holds a small icon for the tool (chat bubble, ticket, globe) |
 | `AWAITING_APPROVAL` | Raises a hand, amber outline, speech bubble shows the exact action and "Say approve or cancel" |
+| `AWAITING_INPUT` | Head tilt and a "?" above; the bubble shows the question with choice buttons or a text box, "or just say it", and Skip |
 | `SPEAKING` | Mouth moves with playback volume (`speak_level`), speech bubble shows the text |
 | `MUTED` | Headphones off icon, grey |
 | `ERROR` | Brief dizzy animation, then back to sleeping |
@@ -352,7 +370,14 @@ State to animation:
 
 Speech bubble: shows what the user said (live partials when the speech-to-text provider streams, otherwise the final transcript), then Jarvis's reply. It fades after 6 seconds. Approval text stays until answered.
 
-Tray menu: Mute or Unmute, Stop current task, Show today's log, Settings (opens the config folder), Start with Windows, Quit.
+Tray menu: Mute or Unmute, Stop current task, Hide pet or Show pet, Hide when idle, Settings (opens the config folder), Start with Windows, Quit (and Play demo while core is not running).
+
+Hiding (`pet/src/main/visibility.ts`):
+
+- **Hide when idle** (on by default): the pet fades out a few seconds (default 8) after Jarvis goes back to sleep.
+- **Hide pet**: hidden until the next wake word.
+- Saying "Hi Jarvis" always brings it back, and it is always visible while the mic is recording (LISTENING, FOLLOW_UP) and while an approval or a question is waiting. Busy states (thinking, speaking) respect a manual hide.
+- The pet never takes keyboard focus, except that it becomes focusable while a question with a text box is open; clicking the box focuses it.
 
 Accessibility: respect the Windows reduced-motion setting, keep text at 14 px or larger, and never rely on color alone for the approval state.
 
@@ -360,9 +385,9 @@ Accessibility: respect the Windows reduced-motion setting, keep text at 14 px or
 
 Defined once in `packages/shared`. The WebSocket binds to `127.0.0.1` only and requires a random token that core generates at startup and passes to the pet through an environment variable.
 
-Core to pet: `state`, `mic_level`, `transcript_partial` (streaming providers only), `transcript_final`, `reply_text`, `speak_level`, `tool_start`, `tool_end`, `approval_request`, `approval_result`, `model_selected`, `budget`, `error`.
+Core to pet: `state`, `mic_level`, `transcript_partial` (streaming providers only), `transcript_final`, `reply_text`, `speak_level`, `tool_start`, `tool_end`, `approval_request`, `approval_result`, `model_selected`, `budget`, `error`, `input_request`, `input_closed`.
 
-Pet to core: `stop`, `mute`, `unmute`, `quit`. The pet can never send `approve`. Approval is voice only, so a compromised UI cannot approve actions.
+Pet to core: `stop`, `mute`, `unmute`, `quit`, `input_reply`, `input_cancel`. The pet can never send `approve`. Approval is voice only, so a compromised UI cannot approve actions; core never treats an `input_reply` as an approval.
 
 ## 13. Memory and scheduler
 
@@ -382,7 +407,7 @@ What it learns:
 | Vocabulary | Names, projects, acronyms the speech-to-text gets wrong and the user corrects | Speech-to-text hints / custom vocabulary and a transcript fix-up table |
 | Routing | Forced-model commands, "that was too slow", "use something smarter", escalations, latency misses | Per-request-kind tier and speed adjustments (7.1 rule 3) |
 | Habits | Repeated requests at similar times ("standup summary at 9:30") | Jarvis may *offer* a routine once ("Want me to do this every weekday?"); it never schedules it without a yes |
-| Contacts and defaults | Who "Priya" is on Slack, default Jira project | Resolving names in tool inputs; still read aloud in approvals |
+| Contacts and defaults | Who "Priya" is on Slack, default Jira project; the same answer to the same question twice (6.2) becomes an offer to remember it | Resolving names in tool inputs and skipping questions; still read aloud in approvals |
 
 Rules:
 
@@ -491,9 +516,11 @@ Needed by phase 4 / 6:
 - MCP discovery (13.2): finds 11 plugin servers; tiers set for Jira and MongoDB tools; Playwright browser configured but disabled.
 - Grounding system prompt (8).
 - `npm run learn-repl` (add `--local` without an API key) to try memory, learning, and routing by typing.
+- Questions in the pet (6.2): choice buttons or a text box, "or just say it", Skip, 30 s timeout; secret-looking questions refused; answers never count as approval. Remembered defaults so the same question stops being asked. Checked on screen: the question bubble with choices. Not tried by hand: clicking an answer and typing (covered by unit tests).
+- Hide pet and Hide when idle (default on, 8 s); the wake word and recording always bring the pet back.
 - Desktop pet, phase 4 app shell (`npm run pet`): Electron, transparent and always on top above the taskbar, click-through except the pet and bubble, draggable with remembered position, tray menu (mute, stop, demo, settings folder, start with Windows, quit), all states and the speech bubble. Main process runs TypeScript directly; the sandboxed preload and the window script are plain JS. Events from core are validated before display and shown with `textContent` only. Until core's WebSocket bridge exists it runs in demo mode (click the pet, or `JARVIS_PET_DEMO=1`). Checked on screen: window, badge, held tool icon, reply bubble, follow-up ring. Not yet seen on screen: the amber approval bubble (screen locked during capture). Still to do for phase 4: core's bridge server, hotkeys in core.
 - `packages/pet/preview/pet-preview.html`: the browser preview used to agree the look.
-- 116 tests pass.
+- 127 tests pass.
 
 Kept lightweight: Node 22.18+ runs the TypeScript directly (type stripping, no build step, no tsx), tests use the built-in `node:test`, and Biome is the only lint/format tool. Dev deps: `typescript`, `@types/node`, `@biomejs/biome`. Runtime deps: `zod`, `yaml`, `@picovoice/pvrecorder-node`, `@picovoice/pvspeaker-node`.
 

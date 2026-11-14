@@ -4,23 +4,34 @@ export type Step =
   | { at: number; event: CoreToPetEvent }
   | { at: number; levels: 'mic' | 'speak'; until: number };
 
+export const DEMO_PROJECT_QUESTION = 'demo-project';
+export const DEMO_TITLE_QUESTION = 'demo-title';
+
 /**
- * A scripted request, used while core is not running, so the pet can be seen
- * doing everything: wake, listen, think on Sonnet, use Jira, ask for approval,
- * act, answer, and fall back asleep. Times are in milliseconds from the start.
+ * A scripted request used while core is not running, so the pet can be seen
+ * doing everything. It runs in three parts because it stops twice to ask:
+ * 1. wake, listen, think on Sonnet, look up Jira projects, ask which project (buttons);
+ * 2. ask for the ticket title (text box);
+ * 3. ask for spoken approval, create the ticket, tell Slack, answer, sleep.
+ * Times are in milliseconds from the start of each part.
  */
 export function demoScript(): Step[] {
-  const reply = 'Done. PROJ-142 is in review and the team has been told on Slack.';
   return [
     { at: 0, event: { type: 'state', state: 'LISTENING' } },
     { at: 0, levels: 'mic', until: 2600 },
-    { at: 500, event: { type: 'transcript_partial', text: 'Move PROJ-142…' } },
-    { at: 1400, event: { type: 'transcript_partial', text: 'Move PROJ-142 to In Review and…' } },
+    { at: 500, event: { type: 'transcript_partial', text: 'Create a Jira ticket for…' } },
+    {
+      at: 1400,
+      event: {
+        type: 'transcript_partial',
+        text: 'Create a Jira ticket for the login timeout and…',
+      },
+    },
     {
       at: 2600,
       event: {
         type: 'transcript_final',
-        text: 'Move PROJ-142 to In Review and tell the team on Slack.',
+        text: 'Create a Jira ticket for the login timeout and tell the team on Slack.',
       },
     },
     {
@@ -28,27 +39,80 @@ export function demoScript(): Step[] {
       event: { type: 'model_selected', tier: 'standard', speed: 'normal', model: 'Sonnet' },
     },
     { at: 2800, event: { type: 'state', state: 'THINKING' } },
-    { at: 3600, event: { type: 'tool_start', tool: 'jira' } },
-    { at: 5000, event: { type: 'tool_end', tool: 'jira', ok: true } },
-    { at: 5100, event: { type: 'state', state: 'AWAITING_APPROVAL' } },
+    { at: 3400, event: { type: 'tool_start', tool: 'jira' } },
+    { at: 4600, event: { type: 'tool_end', tool: 'jira', ok: true } },
+    { at: 4700, event: { type: 'state', state: 'AWAITING_INPUT' } },
     {
-      at: 5100,
+      at: 4700,
       event: {
-        type: 'approval_request',
-        id: 'demo-1',
-        sentence:
-          "I'm about to move PROJ-142 to In Review and post in #team: PROJ-142 is ready for review. Approve or cancel?",
+        type: 'input_request',
+        id: DEMO_PROJECT_QUESTION,
+        question: 'Which project should the ticket go in?',
+        mode: 'choice',
+        options: ['PROJ · Platform', 'WEB · Website', 'MOB · Mobile app'],
       },
     },
-    { at: 9600, event: { type: 'approval_result', id: 'demo-1', approved: true } },
-    { at: 9700, event: { type: 'state', state: 'THINKING' } },
-    { at: 9800, event: { type: 'tool_start', tool: 'slack' } },
-    { at: 11000, event: { type: 'tool_end', tool: 'slack', ok: true } },
-    { at: 11100, event: { type: 'reply_text', text: reply } },
-    { at: 11100, event: { type: 'state', state: 'SPEAKING' } },
-    { at: 11100, levels: 'speak', until: 15200 },
-    { at: 15300, event: { type: 'state', state: 'FOLLOW_UP' } },
-    { at: 21000, event: { type: 'state', state: 'SLEEPING' } },
+  ];
+}
+
+export function demoTitleQuestion(project: string): Step[] {
+  return [
+    { at: 0, event: { type: 'input_closed', id: DEMO_PROJECT_QUESTION } },
+    { at: 0, event: { type: 'state', state: 'THINKING' } },
+    { at: 700, event: { type: 'state', state: 'AWAITING_INPUT' } },
+    {
+      at: 700,
+      event: {
+        type: 'input_request',
+        id: DEMO_TITLE_QUESTION,
+        question: `What should the ${project.split(' ')[0]} ticket be called?`,
+        mode: 'text',
+        placeholder: 'Login times out after 30 seconds',
+      },
+    },
+  ];
+}
+
+export function demoFinish(project: string, title: string): Step[] {
+  const key = `${project.split(' ')[0]}-218`;
+  const reply = `Done. ${key} is created and the team has been told on Slack.`;
+  return [
+    { at: 0, event: { type: 'input_closed', id: DEMO_TITLE_QUESTION } },
+    { at: 0, event: { type: 'state', state: 'THINKING' } },
+    { at: 600, event: { type: 'state', state: 'AWAITING_APPROVAL' } },
+    {
+      at: 600,
+      event: {
+        type: 'approval_request',
+        id: 'demo-approval',
+        sentence: `I'm about to create a bug in ${project.split(' ')[0]} titled "${title}" and post it in #team. Approve or cancel?`,
+      },
+    },
+    // In the real app the user says "approve"; the demo answers for them.
+    { at: 5600, event: { type: 'approval_result', id: 'demo-approval', approved: true } },
+    { at: 5700, event: { type: 'state', state: 'THINKING' } },
+    { at: 5800, event: { type: 'tool_start', tool: 'jira' } },
+    { at: 6800, event: { type: 'tool_start', tool: 'slack' } },
+    { at: 7800, event: { type: 'tool_end', tool: 'slack', ok: true } },
+    { at: 7900, event: { type: 'reply_text', text: reply } },
+    { at: 7900, event: { type: 'state', state: 'SPEAKING' } },
+    { at: 7900, levels: 'speak', until: 11500 },
+    { at: 11600, event: { type: 'state', state: 'FOLLOW_UP' } },
+    { at: 17000, event: { type: 'state', state: 'SLEEPING' } },
+  ];
+}
+
+/** When the user does not answer a demo question. */
+export function demoNoAnswer(id: string): Step[] {
+  return [
+    { at: 0, event: { type: 'input_closed', id } },
+    {
+      at: 0,
+      event: { type: 'reply_text', text: "No answer, so I've stopped there. Nothing was created." },
+    },
+    { at: 0, event: { type: 'state', state: 'SPEAKING' } },
+    { at: 0, levels: 'speak', until: 2600 },
+    { at: 2700, event: { type: 'state', state: 'SLEEPING' } },
   ];
 }
 

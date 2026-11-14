@@ -11,6 +11,17 @@
     <div class="who"><span id="bubbleWho">Jarvis</span><span class="badge" id="bubbleBadge" hidden></span></div>
     <div class="text" id="bubbleText"></div>
     <div class="say" id="bubbleSay" hidden></div>
+    <form class="ask" id="ask" hidden autocomplete="off">
+      <div class="choices" id="choices"></div>
+      <div class="typed" id="typed">
+        <input id="answer" type="text" maxlength="500" aria-label="Your answer">
+        <button type="submit" class="send">Send</button>
+      </div>
+      <div class="ask-foot">
+        <span>or just say it</span>
+        <button type="button" class="link" id="skip">Skip</button>
+      </div>
+    </form>
   </div>
 
   <div class="pet" id="pet" data-state="SLEEPING" data-tool="off" data-budget="ok">
@@ -34,6 +45,7 @@
         <g class="think-dots"><circle cx="80" cy="6" r="3.2"/><circle cx="100" cy="12" r="2.6" opacity=".7"/><circle cx="60" cy="12" r="2.2" opacity=".45"/></g>
         <g class="model-tag" transform="translate(112 30)"><rect width="26" height="20" rx="6"/><text id="modelTag" x="13" y="14.5" text-anchor="middle">H</text></g>
         <text class="zz" x="118" y="34">z</text>
+        <text class="qmark" x="114" y="30">?</text>
         <g class="held" id="held" transform="translate(132 78)"></g>
         <g class="rec-dot"><circle cx="30" cy="40" r="5"/></g>
         <g class="mute-icon" transform="translate(52 140)">
