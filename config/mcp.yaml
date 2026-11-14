@@ -1,13 +1,24 @@
 # MCP servers Jarvis connects to (CLAUDE.md section 4). Each server's tools get
-# risk tiers in permissions.yaml; unlisted tools need spoken approval.
+# risk tiers in permissions.yaml (as mcp__<name here>__<tool>); tools with no
+# tier are hidden from the model at startup.
 #
-# These mirror the servers your Claude Code plugins use (found by
-# discoverMcpServers()). Remote servers need a one-time sign-in by Jarvis itself
-# (phase 3); until then they stay disabled.
+# Jarvis reuses the sign-ins your Claude Code plugins already have: the Claude
+# CLI connects with its own saved sign-in when `signInAs` is the name Claude
+# Code knows the server by (see `claude mcp list`). Jarvis never reads those
+# credentials. Every tool call is first sent to Jarvis's gate (spoken approval,
+# hard blocks, audit log); nothing runs without it.
 servers:
   atlassian: # Jira and Confluence: search, create, move (transition), comment, link
     type: http
-    url: https://mcp.atlassian.com/v2/mcp
+    # The plugin's address; Atlassian retires /v1 on 2027-03-01 (move to /v2/mcp
+    # together with the plugin, so the saved sign-in still matches).
+    url: https://mcp.atlassian.com/v1/mcp
+    signInAs: plugin:engineering:atlassian
+    enabled: true
+  slack: # phase 6: sending needs recipient counting and the reply flow (13.3)
+    type: http
+    url: https://mcp.slack.com/mcp
+    signInAs: plugin:engineering:slack
     enabled: false
   mongodb-atlas: # read-only queries, schema, indexes, performance advice
     type: http

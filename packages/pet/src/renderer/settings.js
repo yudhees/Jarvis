@@ -533,6 +533,7 @@
     command: 'spoken command',
     local: 'handled by Jarvis, no AI',
     stopped: 'stopped',
+    echo: 'Jarvis heard itself; ignored',
     error: 'failed',
   };
   const secs = (ms) => (ms === null || ms === undefined ? '–' : `${(ms / 1000).toFixed(1)} s`);

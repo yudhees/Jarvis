@@ -7,9 +7,14 @@
  *                                     noise alone before and after (where Whisper invents words)
  *   npm run stt-test -- --plain       ignore the stt.vad / beamSize / suppressNonSpeech settings
  *   npm run stt-test -- --beam 1      try another beam size than stt.beamSize
+ *   npm run stt-test -- --mic 6 --compare --say "define software development"
+ *                                     record once, then run that same recording through every
+ *                                     installed model, with and without VAD, scored against --say
  *
  * Nothing is written to disk; audio stays in memory.
  */
+import { readdirSync } from 'node:fs';
+import path from 'node:path';
 import { Microphone, meterBar, rmsLevel, toDbfs } from '@jarvis/core/audio';
 import { loadConfig } from '@jarvis/core/config';
 import { resolveWhisper, serverArgs, WhisperCppStt } from '@jarvis/core/stt';
@@ -21,6 +26,8 @@ const args = scriptArgs({
   noise: { type: 'string' },
   plain: { type: 'boolean' },
   beam: { type: 'string' },
+  compare: { type: 'boolean' },
+  say: { type: 'string' },
   'vad-model': { type: 'string' },
 });
 const { jarvis } = loadConfig();
@@ -129,8 +136,59 @@ try {
       pcm.set(f, o);
       o += f.length;
     }
-    const r = await stt.transcribe(pcm, 16000, { hints: HINTS });
-    console.log(`\n\nHeard (${r.ms} ms): ${r.text || '(nothing)'}`);
+    let peak = 0;
+    for (const s of pcm) peak = Math.max(peak, Math.abs(s));
+    const loudest = frames.map((f) => toDbfs(rmsLevel(f))).sort((a, b) => b - a);
+    const speechDb = loudest[Math.floor(loudest.length * 0.1)] ?? -100;
+    const quietDb = loudest[Math.floor(loudest.length * 0.9)] ?? -100;
+    console.log(
+      `\n\nLevels: peak ${toDbfs(peak / 32768).toFixed(0)} dBFS, speech about ${speechDb.toFixed(0)} dBFS, room about ${quietDb.toFixed(0)} dBFS.`,
+    );
+    if (speechDb < -35) console.log('  Quiet: raise the mic level in Windows sound settings.');
+    if (peak >= 32000) console.log('  Clipping: lower the mic level in Windows sound settings.');
+    const expected = typeof args.say === 'string' ? args.say : undefined;
+    const score = (text: string) =>
+      expected ? ` (${Math.round(wordAccuracy(expected, text) * 100)}% words right)` : '';
+
+    if (args.compare !== true) {
+      const r = await stt.transcribe(pcm, 16000, { hints: HINTS });
+      console.log(`\nHeard (${r.ms} ms): ${r.text || '(nothing)'}${score(r.text)}`);
+    } else {
+      // The same recording through every installed model, with and without VAD.
+      await stt.close();
+      const modelDir = path.join(jarvis.dataDir, 'models');
+      const models = readdirSync(modelDir).filter(
+        (f) => /^ggml-.*\.bin$/.test(f) && !f.startsWith('ggml-silero'),
+      );
+      for (const model of models) {
+        for (const withVad of [false, true]) {
+          if (withVad && !vadModelPath) continue;
+          const one = new WhisperCppStt({
+            ...stt.options,
+            modelPath: path.join(modelDir, model),
+            vadModelPath: withVad ? vadModelPath : undefined,
+          });
+          try {
+            await one.start();
+            await one.transcribe(pcm.subarray(0, 8000), 16000); // warm up
+            const r = await one.transcribe(pcm, 16000, { hints: HINTS });
+            console.log(
+              `\n${model}${withVad ? ' + VAD' : ''} (${r.ms} ms):\n  ${r.text || '(nothing)'}${score(r.text)}`,
+            );
+          } finally {
+            await one.close();
+          }
+        }
+      }
+      const missing = ['ggml-small.en-q5_1.bin', 'ggml-large-v3-turbo-q5_0.bin'].filter(
+        (m) => !models.includes(m),
+      );
+      if (missing.length > 0) {
+        console.log(
+          `\nTo compare more models, install them first:\n${missing.map((m) => `  npm run setup-whisper -- --model ${m}`).join('\n')}`,
+        );
+      }
+    }
   } else {
     const samples = [
       'What time is it in Tokyo?',

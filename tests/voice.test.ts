@@ -965,3 +965,37 @@ describe('Conversation.preview', () => {
     assert.equal(learner.aboutUserBlock(), '', 'nothing saved');
   });
 });
+
+describe('Jarvis never answers its own voice (10.4)', () => {
+  it('an interruption that was only the echo is dropped, and the next one is stricter', async () => {
+    const t = fakeLoop("I don't have your location saved.|Which city should I look up?", 3000, {
+      playLevel: 0.3, // about -10 dBFS out
+      heard: ['show me the weather', "I don't have."],
+    });
+    const quit = new AbortController();
+    const running = t.loop.run(quit.signal);
+    t.feed.push(QUIET, 20);
+    t.feed.push(WAKE);
+    say(t.feed);
+    await until(() => t.loop.state === 'SPEAKING');
+    for (let i = 0; i < 30; i++) {
+      t.feed.push(frame(-40)); // the echo, while the grace period learns it
+      await tick(8);
+    }
+    for (let i = 0; i < 14; i++) {
+      t.feed.push(frame(-8)); // loud enough to pass for the user
+      await tick(8);
+    }
+    await until(() => t.loop.state === 'LISTENING');
+    t.feed.push(QUIET, 12);
+    await until(() => t.heardSeconds.length === 2);
+    await until(() => t.loop.state === 'FOLLOW_UP' || t.loop.state === 'SLEEPING');
+    assert.deepEqual(t.asked, ['show me the weather'], 'the echo was not answered');
+    assert.ok(
+      !t.events.some((e) => e.type === 'transcript_final' && e.text === "I don't have."),
+      'not shown as something the user said',
+    );
+    quit.abort();
+    await running;
+  });
+});

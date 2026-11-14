@@ -17,7 +17,7 @@ import {
   TaskState,
   UNLISTED_TIER,
 } from '@jarvis/core/guard';
-import { fileTools, JiraClient, jiraTools } from '@jarvis/core/tools';
+import { fileTools } from '@jarvis/core/tools';
 import type { RiskTier } from '@jarvis/shared';
 
 describe('spoken approval (CLAUDE.md 9)', () => {
@@ -100,18 +100,38 @@ describe('tier 3 confirmation codes', () => {
 describe('approval sentences come from the real tool input', () => {
   it('names exactly what will happen', () => {
     assert.equal(
-      approvalText('jira_transition', { issue: 'PROJ-142', status: 'In Review' }).sentence,
-      "I'm about to move PROJ-142 to In Review.",
+      approvalText('mcp__atlassian__transitionJiraIssue', {
+        cloudId: 'x',
+        issueIdOrKey: 'PROJ-142',
+        transition: { id: '31' },
+      }).sentence,
+      "I'm about to change the status of PROJ-142 (Jira transition 31).",
     );
     assert.equal(
-      approvalText('jira_comment', { issue: 'PROJ-1', body: 'Fixed in build 12' }).sentence,
+      approvalText('mcp__atlassian__addCommentToJiraIssue', {
+        cloudId: 'x',
+        issueIdOrKey: 'PROJ-1',
+        commentBody: 'Fixed in build 12',
+      }).sentence,
       "I'm about to add to PROJ-1 a comment saying: Fixed in build 12.",
+    );
+    assert.equal(
+      approvalText('mcp__atlassian__createJiraIssue', {
+        cloudId: 'x',
+        projectKey: 'PROJ',
+        issueTypeName: 'Bug',
+        summary: 'Login timeout',
+      }).sentence,
+      "I'm about to create a bug in PROJ titled: Login timeout.",
     );
   });
 
   it('long content is spoken as its length and shown in full', () => {
     const body = 'word '.repeat(40).trim();
-    const t = approvalText('jira_comment', { issue: 'PROJ-1', body });
+    const t = approvalText('mcp__atlassian__addCommentToJiraIssue', {
+      issueIdOrKey: 'PROJ-1',
+      commentBody: body,
+    });
     assert.match(t.sentence, /a 40-word comment/);
     assert.ok(t.fullText.includes(body));
   });
@@ -120,6 +140,12 @@ describe('approval sentences come from the real tool input', () => {
     assert.match(
       approvalText('mystery_tool', { target: 'prod-db' }).sentence,
       /mystery tool.*prod-db/,
+    );
+    // MCP names are spoken plainly, and the cloud ID is left out.
+    assert.equal(
+      approvalText('mcp__atlassian__updateConfluencePage', { cloudId: 'abc', pageId: '7' })
+        .sentence,
+      "I'm about to use update confluence page with pageId 7.",
     );
   });
 });
@@ -317,7 +343,13 @@ describe('the permission gate', () => {
     const { permissions } = loadConfig();
     const t = permissions.tools;
     assert.deepEqual(
-      [t.jira_search, t.jira_get, t.jira_transition, t.jira_comment, t.jira_create],
+      [
+        t.mcp__atlassian__searchJiraIssuesUsingJql,
+        t.mcp__atlassian__getJiraIssue,
+        t.mcp__atlassian__transitionJiraIssue,
+        t.mcp__atlassian__addCommentToJiraIssue,
+        t.mcp__atlassian__createJiraIssue,
+      ],
       [0, 0, 2, 2, 2],
     );
     assert.deepEqual([t.file_list, t.file_read, t.file_write, t.file_delete], [0, 0, 2, 3]);
@@ -348,81 +380,6 @@ describe('audit log (10.7)', () => {
     assert.equal(JSON.parse(lines[1] ?? '{}').type, 'denied');
     writeFileSync(path.join(dir, '2026-08-01.jsonl'), '{}\n');
     assert.equal(log.prune(), 1);
-  });
-});
-
-describe('Jira tools', () => {
-  const calls: { method: string; url: string; body?: unknown }[] = [];
-  const fakeFetch = (async (url: string | URL | Request, init?: RequestInit) => {
-    const u = String(url);
-    calls.push({
-      method: init?.method ?? 'GET',
-      url: u,
-      body: init?.body ? JSON.parse(String(init.body)) : undefined,
-    });
-    const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status });
-    if (u.endsWith('/myself')) return json({ displayName: 'Dee' });
-    if (u.endsWith('/search/jql')) {
-      return json({
-        issues: [
-          {
-            key: 'PROJ-142',
-            fields: { summary: 'Login timeout', status: { name: 'In Progress' }, assignee: null },
-          },
-        ],
-      });
-    }
-    if (u.endsWith('/transitions') && (init?.method ?? 'GET') === 'GET') {
-      return json({
-        transitions: [
-          { id: '31', name: 'Review', to: { name: 'In Review' } },
-          { id: '41', name: 'Done', to: { name: 'Done' } },
-        ],
-      });
-    }
-    if (u.endsWith('/transitions')) return new Response(null, { status: 204 });
-    if (u.endsWith('/bad/myself')) return json({}, 401);
-    return json({ errorMessages: ['nope'] }, 404);
-  }) as typeof fetch;
-  const client = new JiraClient({
-    site: 'https://acme.atlassian.net',
-    email: 'me@acme.com',
-    token: 't0k',
-    fetch: fakeFetch,
-  });
-  const tools = Object.fromEntries(jiraTools(client).map((t) => [t.name, t]));
-
-  it('searches and moves tickets through the REST API', async () => {
-    assert.match(
-      (await tools.jira_search?.run({ jql: 'assignee = currentUser()' })) ?? '',
-      /PROJ-142 \[In Progress\] Login timeout \(unassigned\)/,
-    );
-    assert.equal(
-      await tools.jira_transition?.run({ issue: 'proj-142', status: 'in review' }),
-      'Moved PROJ-142 to In Review.',
-    );
-    assert.deepEqual(calls.at(-1)?.body, { transition: { id: '31' } });
-    assert.match(
-      (await tools.jira_transition?.run({ issue: 'PROJ-142', status: 'Blocked' })) ?? '',
-      /can move to: In Review, Done/,
-    );
-  });
-
-  it('reads are marked as outside content; bad keys are refused before any request', async () => {
-    assert.equal(tools.jira_get?.untrusted, true);
-    const before = calls.length;
-    await assert.rejects(
-      tools.jira_get?.run({ issue: '142' }) ?? Promise.resolve(),
-      /not a Jira issue key/,
-    );
-    assert.equal(calls.length, before);
-  });
-
-  it('refuses a site that is not Atlassian Cloud', () => {
-    assert.throws(
-      () => new JiraClient({ site: 'http://evil.example', email: 'a', token: 'b' }),
-      /atlassian\.net/,
-    );
   });
 });
 

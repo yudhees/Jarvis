@@ -575,6 +575,7 @@ input[type="text"]:hover {
   margin: 0;
   cursor: pointer;
 }
+/* biome-ignore lint/style/noDescendingSpecificity: different component, never the same element */
 .swatch span {
   display: grid;
   place-items: center;
@@ -587,6 +588,7 @@ input[type="text"]:hover {
   color: #fff;
   pointer-events: none;
 }
+/* biome-ignore lint/style/noDescendingSpecificity: different component, never the same element */
 .swatch.default span {
   background: conic-gradient(from 45deg, var(--bg) 0 50%, var(--line) 0 100%);
   color: var(--muted);
@@ -968,6 +970,7 @@ input[type="text"]:hover {
 .plain li:first-child {
   border-top: 0;
 }
+/* biome-ignore lint/style/noDescendingSpecificity: different component, never the same element */
 .plain li > span {
   color: var(--muted);
   font: 12.5px var(--mono);
@@ -977,6 +980,7 @@ input[type="text"]:hover {
   align-items: center;
   gap: 4px;
 }
+/* biome-ignore lint/style/noDescendingSpecificity: different component, never the same element */
 .keys li > span {
   margin-left: 10px;
   font: inherit;
@@ -1039,6 +1043,7 @@ kbd {
 }
 @media (prefers-reduced-motion: reduce) {
   * {
+    /* biome-ignore lint/complexity/noImportantStyles: reduced motion must win over every animation */
     transition: none !important;
   }
 }

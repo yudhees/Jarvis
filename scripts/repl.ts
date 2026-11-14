@@ -25,6 +25,7 @@ try {
   opened = await openConversation(config, {
     local: args.local === true,
     projectDir: process.cwd(),
+    selfTest: true,
   });
 } catch (err) {
   console.error((err as Error).message);
@@ -103,7 +104,7 @@ opened.setApprover(async (request) => {
   }
   return { outcome: 'cancel' };
 });
-console.log(`Tools: ${opened.toolNames.join(', ') || 'none'}. Jira: ${opened.jira}.${opened.dryRun ? ' DRY RUN.' : ''}
+console.log(`Tools: ${opened.toolNames.join(', ') || 'none'}. Services: ${opened.services}.${opened.dryRun ? ' DRY RUN.' : ''}
 `);
 
 const prompt = () => process.stdout.write('You: ');

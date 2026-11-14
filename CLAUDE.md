@@ -543,7 +543,10 @@ Needed by phase 4 / 6:
 **Phase 3: tools and approval, built (awaiting user sign-off).** Decided with the user 2026-11-14: Jira first, and file tools limited to `Documents\Jarvis`.
 - **Design (differs from section 4 on purpose):** no Agent SDK.
   - The Claude CLI runs on the subscription with no tools at all. The model asks for a tool with a `[[LOOKUP name: args]]` line, and Jarvis runs it behind the gate. This is the strictest lockdown: nothing can run except through Jarvis's code.
-  - Jira uses its REST API with an API token (`tools/jira.ts`) instead of the Atlassian MCP server, which needs an interactive OAuth sign-in a headless Jarvis cannot do. Recorded here instead of the spec's "one read-only and one write-capable MCP server".
+  - **MCP servers reuse Claude Code's sign-ins** (decided with the user 2026-11-14: no tokens or connectors). For servers enabled in `config/mcp.yaml`, the CLI gets `--mcp-config` with the plugin's own server name (`signInAs`, e.g. `plugin:engineering:atlassian`), so it connects with the sign-in Claude Code already saved. Jarvis never reads it. The claude.ai connectors are off (`ENABLE_CLAUDEAI_MCP_SERVERS=false`).
+  - **Every MCP call goes through Jarvis's gate first:** `--permission-mode default --permission-prompt-tool mcp__jarvis__permit`. `agent/permit-mcp.mjs` is a tiny stdio MCP server the CLI starts; it asks core's `PermitServer` (127.0.0.1, random port and token, no Origin) and denies if core can't be reached. Core runs `GatedTools.permit`: hard blocks, tier, spoken approval, audit, and marks the task as having read outside content. The exact input that was checked is the one that runs. MCP resource tools and the permit tool itself are hidden from the model.
+  - Lockdown check on every CLI start: no built-in tools, tools only from the given servers, no other servers. Tools with no tier in permissions.yaml are hidden (`--disallowed-tools`) after the startup self-test.
+  - Atlassian stays on `/v1/mcp` because that's where the plugin's sign-in is (v2 needs its own sign-in). Atlassian retires v1 on 2027-03-01.
 - **Guard** (`core/src/guard/`), tested by the hostile-input suite `tests/guard.test.ts`:
   - **gate.ts:** tier from permissions.yaml (unlisted = 2, fixed in code), hard blocks, the outside-content rule (10.3), recipient counting, and no more than 3 identical calls. A failing check denies.
   - **approval.ts:** a strict matcher on the whole utterance. Cancel wins anywhere, and a single word never approves (10.4). Tier 3 codes accept "confirm 47", "confirm four seven", "confirm for seven" and "confirm forty seven"; a wrong code cancels.
@@ -559,18 +562,18 @@ Needed by phase 4 / 6:
   - the REPL can answer by typing, for testing only.
 - **Audit log** (`audit/`): `%APPDATA%/jarvis/audit/YYYY-MM-DD.jsonl` records tool calls, decisions, questions, what was heard, outcomes, results and denials. Secrets are redacted by key name and by content. Days older than `retention.transcriptDays` (30) are deleted at start and daily.
 - **Tools:**
-  - **Jira:** `jira_search`, `jira_get` and `jira_transitions` are tier 0; `jira_transition`, `jira_comment` and `jira_create` are tier 2.
+  - **Jira and Confluence (Atlassian MCP):** all 32 tools have tiers; reads are tier 0; create, edit, transition, comment, worklog, link and Confluence writes are tier 2. Approval sentences come from the real input ("change the status of PROJ-142 (Jira transition 31)": the MCP tool takes only the transition ID).
+  - Slack is set up the same way but disabled until phase 6.
   - **Files:** `file_list` and `file_read` are tier 0, `file_write` is tier 2, `file_delete` is tier 3 (single files only).
 - **Startup self-test:**
   - Every offered tool must have a tier in permissions.yaml (`LockdownError`).
   - The Claude CLI's init report must list 0 tools and 0 MCP servers, checked at startup with one tiny Haiku request (live: 0 and 0, 0.6 s) and on every new session.
-- **Verified live through the Claude CLI:** listing and reading files ran unasked; writing asked and wrote after "yes approve"; deleting asked for a code and "confirm 12" cancelled it. The audit log recorded every step, including what was heard.
+- **Verified live through the Claude CLI:** "what are my three most recently updated Jira tickets" listed real tickets with no question (about 11 s on Sonnet); "add the comment ... to the first one" asked "I'm about to add to BKE-352 a comment saying: ...", and "cancel" left the ticket unchanged. Listing and reading files ran unasked; writing asked and wrote after "yes approve"; deleting asked for a code and "confirm 12" cancelled it. The audit log recorded every step, including what was heard.
 - **Not done:**
-  - Jira not tried live: it needs `jira.site` and `jira.email` in jarvis.yaml and `npm run set-key -- jira`;
   - spoken approval not tried by voice yet (tested with a fake mic);
   - recipient counting is in the gate, but there's no sending tool yet (Slack is phase 6);
   - the 5-minute wall-clock limit per task is not enforced yet.
-- 284 tests pass.
+- 308 tests pass.
 
 **Phase 2: router, done (awaiting user sign-off).** `tests/router.samples.json` routes 30 of 30 requests to the right tier and speed (27 needed). The test also proves rule-decided requests never call the classifier.
 - **Jira issue keys:** a key like PROJ-142 (upper case) makes a request a Jira one.
@@ -623,6 +626,10 @@ Phase 1 (`npm start`, `npm run repl`):
   - **Talking over Jarvis while it speaks:** it stops at once and listens.
   - **Echo:** Jarvis's own voice from the speakers is told apart by comparing the mic level with the level being played. The expected echo is learned, and the user must be 10 dB above it for about 0.3 s.
   - **Pause length:** `silenceMs` is now 1000.
+  - **Bug fixed 2026-11-14: Jarvis answered its own voice on laptop speakers.** Every reply was cut off ("stopped") and the start of it came back as the next request ("I don't have." after "I don't have your location saved…"). Two causes, two fixes:
+    - The echo filter started from a guess (mic 12 dB under playback) and learned upward too slowly, so the first ~300 ms of every reply looked like the user. Now the first 700 ms of each reply only learn the echo (fast upward). Each false interruption makes it 6 dB stricter (capped at +20 dB).
+    - New text check (`voice/echo-text.ts`): an utterance that began as an interruption or within 1.5 s of Jarvis's audio, and whose words are Jarvis's own recent words in order (fuzzy, for Whisper's cut-offs like "No prop."), is dropped and never answered. History shows it as "Jarvis heard itself; ignored". Tested on the 8 real lines from that conversation.
+    - Not tried by voice on speakers yet.
 - Not done in phase 1:
   - measuring against the 3-second end-to-end target;
   - trying the interruptions by voice on speakers;

@@ -21,6 +21,7 @@ import type { SttProvider } from '../stt/index.ts';
 import type { TtsProvider } from '../tts/index.ts';
 import { afterWakeWord, isWakeWordOnly, matchCommand, stripWakeWord } from './commands.ts';
 import type { AskOptions, AskResult, ConversationPreview } from './conversation.ts';
+import { isOwnEcho } from './echo-text.ts';
 import { SpeechQueue } from './speech-queue.ts';
 
 export interface VoiceLoopTiming {
@@ -63,6 +64,8 @@ export interface TurnLog {
   result?: AskResult;
   command?: string;
   stopped: boolean;
+  /** It was Jarvis's own voice coming back through the mic; nothing was answered. */
+  echo?: boolean;
   /** The first-word budget for this request's speed, and whether it was missed. */
   latencyBudgetMs?: number;
   latencyMiss?: boolean;
@@ -113,6 +116,10 @@ const REPLAY_MARGIN_SECONDS = 0.25;
 const BARGE_IN_MS = 280;
 /** Audio kept from before the interruption was noticed. */
 const BARGE_IN_REPLAY_SECONDS = BARGE_IN_MS / 1000 + 0.05;
+/** Speech starting this soon after Jarvis's audio stopped may be its echo or room reverb. */
+const ECHO_TAIL_MS = 1500;
+/** Words of Jarvis's recent speech kept for the echo check (about two replies). */
+const SPOKEN_WORDS = 80;
 /** Frames quieter than this at the end of a request are the pause, not words. */
 const TRAILING_QUIET_DBFS = -50;
 /** While asleep, this much quiet ends a burst of speech to check for "Jarvis". */
@@ -157,6 +164,15 @@ export class VoiceLoop {
   #playing = 0;
   /** Audio of the request being answered, joined with the rest if the user goes on talking. */
   #utterance: Int16Array | undefined;
+  /** When Jarvis's audio was last heard playing (performance.now()). */
+  #lastPlayedAt = Number.NEGATIVE_INFINITY;
+  /** The last words Jarvis said aloud, to recognise them if the mic hears them back. */
+  #spoken = '';
+  /**
+   * The utterance being recorded may be Jarvis's own voice: it started with an
+   * interruption while Jarvis spoke ('barge') or right after it stopped ('tail').
+   */
+  #echoRisk: 'barge' | 'tail' | undefined;
   /** Finds bursts of speech while asleep (wakeByTranscript). */
   #sleepEp: Endpointer | undefined;
   /** A burst is being checked for the wake word. */
@@ -466,7 +482,7 @@ export class VoiceLoop {
       tts: this.#d.tts,
       player: this.#d.player,
       signal,
-      onSentence: (s) => this.#d.emit({ type: 'reply_text', text: s }),
+      onSentence: (s) => this.#spokeSentence(s),
       onLevel: (level) => this.#onSpeakLevel(level),
     });
     queue.say(text);
@@ -569,8 +585,15 @@ export class VoiceLoop {
     }
   }
 
+  /** A sentence Jarvis is saying: show it, and remember it for the echo check. */
+  #spokeSentence(text: string): void {
+    this.#d.emit({ type: 'reply_text', text });
+    this.#spoken = `${this.#spoken} ${text}`.split(/\s+/).slice(-SPOKEN_WORDS).join(' ');
+  }
+
   #onSpeakLevel(level: number): void {
     this.#playing = level;
+    if (level > 0) this.#lastPlayedAt = performance.now();
     this.#d.emit({ type: 'speak_level', level });
   }
 
@@ -584,6 +607,7 @@ export class VoiceLoop {
     this.#cancelTask();
     this.#barge.reset();
     this.#listen(this.#d.timing.startTimeoutMs);
+    if (state === 'SPEAKING') this.#echoRisk = 'barge';
     if (earlier) {
       // Their earlier words, without the pause at the end (that pause plus the
       // one before they went on would otherwise count as "finished").
@@ -617,11 +641,16 @@ export class VoiceLoop {
 
     const r = this.#ep.push(frame);
     this.#d.emit({ type: 'mic_level', level: rmsLevel(frame) });
+    if (r.type === 'speech_start' && performance.now() - this.#lastPlayedAt < ECHO_TAIL_MS) {
+      this.#echoRisk ??= 'tail';
+    }
     if (r.type === 'speech_start' && state === 'FOLLOW_UP') {
       this.#sm.to('LISTENING');
     } else if (r.type === 'end') {
       this.#ep = undefined;
-      void this.#turn(r.pcm);
+      const risk = this.#echoRisk;
+      this.#echoRisk = undefined;
+      void this.#turn(r.pcm, undefined, risk);
     } else if (r.type === 'no_speech') {
       this.#ep = undefined;
       if (this.#testing) this.#reportTest({ outcome: 'nothing', heard: '', text: '', sttMs: 0 });
@@ -631,6 +660,7 @@ export class VoiceLoop {
   }
 
   #listen(startTimeoutMs: number): void {
+    this.#echoRisk = undefined;
     this.#sm.to('LISTENING');
     this.#ep = this.#newEndpointer(startTimeoutMs);
   }
@@ -654,7 +684,7 @@ export class VoiceLoop {
   }
 
   /** One request: transcribe, answer, speak, then the follow-up window. */
-  async #turn(pcm: Int16Array, alreadyHeard?: string): Promise<void> {
+  async #turn(pcm: Int16Array, alreadyHeard?: string, echoRisk?: 'barge' | 'tail'): Promise<void> {
     const task = new AbortController();
     this.#task = task;
     const { signal } = task;
@@ -699,6 +729,15 @@ export class VoiceLoop {
         this.#sm.to('SLEEPING');
         return;
       }
+      if (echoRisk && isOwnEcho(text, this.#spoken)) {
+        // The mic heard Jarvis, not the user (10.4): never answer it. An
+        // interruption that was really the echo means the echo is louder than
+        // learned, so the interruption check gets stricter.
+        log.echo = true;
+        if (echoRisk === 'barge') this.#barge.falseAlarm();
+        this.#followUp();
+        return;
+      }
       this.#d.emit({ type: 'transcript_final', text });
 
       const command = matchCommand(text);
@@ -718,7 +757,7 @@ export class VoiceLoop {
           log.firstAudioMs ??= performance.now() - t0;
           if (!signal.aborted) this.#sm.to('SPEAKING');
         },
-        onSentence: (s) => this.#d.emit({ type: 'reply_text', text: s }),
+        onSentence: (s) => this.#spokeSentence(s),
         onLevel: (level) => this.#onSpeakLevel(level),
       });
       filler = setTimeout(() => {
@@ -767,7 +806,7 @@ export class VoiceLoop {
       onStart: () => {
         if (!signal.aborted) this.#sm.to('SPEAKING');
       },
-      onSentence: (s) => this.#d.emit({ type: 'reply_text', text: s }),
+      onSentence: (s) => this.#spokeSentence(s),
       onLevel: (level) => this.#onSpeakLevel(level),
     });
     queue.say(text);

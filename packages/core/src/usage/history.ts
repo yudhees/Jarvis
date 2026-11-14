@@ -11,7 +11,7 @@ import { localDate } from './usage.ts';
  * transcript retention period (CLAUDE.md 10.7).
  */
 
-export type HistoryOutcome = 'answered' | 'command' | 'local' | 'stopped' | 'error';
+export type HistoryOutcome = 'answered' | 'command' | 'local' | 'stopped' | 'echo' | 'error';
 
 export interface HistoryTurn {
   at: string; // ISO time the request was finished
@@ -54,6 +54,8 @@ export interface HistorySource {
   totalMs: number;
   command?: string;
   stopped: boolean;
+  /** Jarvis's own voice came back through the mic; nothing was answered. */
+  echo?: boolean;
   latencyMiss?: boolean;
   error?: string;
   result?: {
@@ -123,6 +125,7 @@ export function toHistoryTurn(t: HistorySource, now: Date = new Date()): History
   const r = t.result;
   let outcome: HistoryOutcome;
   if (t.error) outcome = 'error';
+  else if (t.echo) outcome = 'echo';
   else if (t.stopped) outcome = 'stopped';
   else if (t.command) outcome = 'command';
   else if (r?.tier) outcome = 'answered';
@@ -156,7 +159,14 @@ export function toHistoryTurn(t: HistorySource, now: Date = new Date()): History
   return turn;
 }
 
-const OUTCOMES = new Set<HistoryOutcome>(['answered', 'command', 'local', 'stopped', 'error']);
+const OUTCOMES = new Set<HistoryOutcome>([
+  'answered',
+  'command',
+  'local',
+  'stopped',
+  'echo',
+  'error',
+]);
 
 /** Reads one stored line defensively: anything odd is dropped. */
 export function parseHistoryTurn(value: unknown): HistoryTurn | null {

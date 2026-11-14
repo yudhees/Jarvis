@@ -453,7 +453,9 @@ body {
   *,
   *::before,
   *::after {
+    /* biome-ignore lint/complexity/noImportantStyles: reduced motion must win over every animation */
     animation: none !important;
+    /* biome-ignore lint/complexity/noImportantStyles: reduced motion must win over every animation */
     transition: none !important;
   }
 }

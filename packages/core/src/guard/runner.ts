@@ -100,7 +100,12 @@ export class GatedTools {
     return wrapped;
   }
 
-  async #call(tool: RunnableTool, input: Record<string, unknown>): Promise<string> {
+  /** Gate, then spoken approval if needed: the tier it was cleared at, or what to tell the model. */
+  async #clear(
+    name: string,
+    input: Record<string, unknown>,
+  ): Promise<{ tier: RiskTier } | { refused: string }> {
+    const tool = { name };
     const task = this.#task;
     const audit = this.#o.audit;
     const decision = await this.#o.gate.decide({ tool: tool.name, input }, task);
@@ -119,7 +124,7 @@ export class GatedTools {
         tier: decision.tier,
         reason: decision.reason,
       });
-      return `Not done: this is not allowed (${decision.reason}).`;
+      return { refused: `Not done: this is not allowed (${decision.reason}).` };
     }
     if (decision.kind === 'ask') {
       const request: ApprovalRequest = {
@@ -147,12 +152,42 @@ export class GatedTools {
       }
       audit?.write({ type: 'approval_answer', id: request.id, tool: tool.name, outcome, heard });
       if (outcome === 'timeout')
-        return 'Not done: no answer in time, so it was cancelled. Nothing changed.';
-      if (outcome === 'cancel') return 'Not done: the user cancelled. Nothing changed.';
+        return { refused: 'Not done: no answer in time, so it was cancelled. Nothing changed.' };
+      if (outcome === 'cancel')
+        return { refused: 'Not done: the user cancelled. Nothing changed.' };
       // "Approve all" only ever covers tier 2, the same tool, this task (rule 9.7).
       if (outcome === 'approve_all' && request.tier === 2) task.approvedAll.add(tool.name);
     }
 
+    return { tier: decision.tier };
+  }
+
+  /**
+   * For tools another process runs (MCP tools inside the Claude CLI): the same
+   * gate, spoken approval and audit, but Jarvis only answers allow or deny.
+   * Every MCP result comes from outside, so an allowed call marks the task as
+   * having read outside content (10.3).
+   */
+  async permit(
+    name: string,
+    input: Record<string, unknown>,
+  ): Promise<{ allow: true } | { allow: false; message: string }> {
+    const cleared = await this.#clear(name, input);
+    if ('refused' in cleared) return { allow: false, message: cleared.refused };
+    if (this.#o.dryRun && cleared.tier >= 2) {
+      this.#o.audit?.write({ type: 'tool_result', tool: name, dryRun: true });
+      return { allow: false, message: `Dry run: approved, but not actually done (${name}).` };
+    }
+    this.#task.readUntrusted = true;
+    this.#o.audit?.write({ type: 'tool_permitted', tool: name });
+    return { allow: true };
+  }
+
+  async #call(tool: RunnableTool, input: Record<string, unknown>): Promise<string> {
+    const decision = await this.#clear(tool.name, input);
+    if ('refused' in decision) return decision.refused;
+    const task = this.#task;
+    const audit = this.#o.audit;
     if (this.#o.dryRun && decision.tier >= 2) {
       audit?.write({ type: 'tool_result', tool: tool.name, dryRun: true });
       return `Dry run: approved, but not actually done (${tool.name}).`;

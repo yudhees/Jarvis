@@ -25,7 +25,7 @@ import { readSecret } from './secrets/index.ts';
 import { resolveWhisper, WhisperCppStt } from './stt/index.ts';
 import { WindowsSapiTts } from './tts/index.ts';
 import { HistoryLog, UsageLog } from './usage/index.ts';
-import { ClaudeCliReplyModel, type TurnLog, VoiceLoop, WAKE_HINT } from './voice/index.ts';
+import { type TurnLog, VoiceLoop, WAKE_HINT } from './voice/index.ts';
 import { LockdownError, MissingKeyError, openConversation } from './voice/open.ts';
 
 const { values: args } = parseArgs({ options: { local: { type: 'boolean' } }, strict: true });
@@ -87,7 +87,11 @@ async function openKeywords(): Promise<{ spotter: KeywordSpotter | null; how: st
 
 let opened: Awaited<ReturnType<typeof openConversation>>;
 try {
-  opened = await openConversation(config, { local: args.local, projectDir: process.cwd() });
+  opened = await openConversation(config, {
+    local: args.local,
+    projectDir: process.cwd(),
+    selfTest: true,
+  });
 } catch (err) {
   console.error(
     err instanceof MissingKeyError || err instanceof LockdownError
@@ -97,18 +101,6 @@ try {
   process.exit(1);
 }
 const { conversation, learner } = opened;
-
-// Startup self-test (CLAUDE.md 4): the Claude CLI must see no tools and no MCP
-// servers; Jarvis runs every tool itself, behind the gate. Refuse to start if not.
-if (opened.model instanceof ClaudeCliReplyModel) {
-  try {
-    await opened.model.selfTest(config.models.tiers.simple);
-  } catch (err) {
-    console.error(`Startup self-test failed: ${(err as Error).message}`);
-    await opened.close();
-    process.exit(1);
-  }
-}
 
 const { serverExe, modelPath, vadModelPath, vadMissing } = resolveWhisper(
   jarvis.dataDir,
@@ -364,7 +356,7 @@ opened.setApprover((request) => loop.approver.ask(request));
 
 console.log(
   `Jarvis is ready. Brain: ${opened.brain}. Memory: ${opened.memory}. ${opened.skillCount} skills found.\n` +
-    `Tools: ${opened.toolNames.join(', ') || 'none'}. Jira: ${opened.jira}. Files: ${opened.folders.join(', ') || 'off'}.${opened.dryRun ? ' DRY RUN: approved changes are only logged.' : ''}\n` +
+    `Tools: ${opened.toolNames.join(', ') || 'none'}. Services: ${opened.services}. Files: ${opened.folders.join(', ') || 'off'}.${opened.dryRun ? ' DRY RUN: approved changes are only logged.' : ''}\n` +
     `${wakeHow}, then your request (or Ctrl+Alt+L). ` +
     'Ctrl+Alt+J stops, Ctrl+Alt+M mutes, Ctrl+C quits.',
 );

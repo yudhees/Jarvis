@@ -1,5 +1,12 @@
 export { ReplyModelClassifier } from './classifier-model.ts';
-export { type ClaudeCliOptions, ClaudeCliReplyModel, findClaudeExe } from './claude-cli.ts';
+export {
+  type ClaudeCliOptions,
+  ClaudeCliReplyModel,
+  type CliInit,
+  type CliMcp,
+  findClaudeExe,
+  lockdownProblem,
+} from './claude-cli.ts';
 export {
   afterWakeWord,
   isWakeWordOnly,

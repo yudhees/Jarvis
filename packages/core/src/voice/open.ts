@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Anthropic from '@anthropic-ai/sdk';
+import { jarvisToolName, PermitServer } from '../agent/index.ts';
 import { AuditLog } from '../audit/index.ts';
 import { type Config, expandWindowsVars } from '../config/index.ts';
 import { type Approver, Gate, GatedTools } from '../guard/index.ts';
@@ -14,10 +15,15 @@ import {
 } from '../memory/index.ts';
 import { readSecret } from '../secrets/index.ts';
 import { defaultSkillRoots, discoverSkills } from '../skills/index.ts';
-import { fileTools, type JarvisTool, JiraClient, jiraTools } from '../tools/index.ts';
+import { fileTools, type JarvisTool } from '../tools/index.ts';
 import { windowsTools } from '../tools/windows.ts';
 import { ReplyModelClassifier } from './classifier-model.ts';
-import { ClaudeCliReplyModel, findClaudeExe } from './claude-cli.ts';
+import {
+  ClaudeCliReplyModel,
+  type CliMcp,
+  type CliMcpServer,
+  findClaudeExe,
+} from './claude-cli.ts';
 import { ClaudeReplyModel, Conversation, type ReplyModel } from './conversation.ts';
 
 export class MissingKeyError extends Error {}
@@ -38,8 +44,8 @@ export interface OpenedConversation {
   /** Hands spoken approval to the voice loop (or the REPL). */
   setApprover(fn: Approver['ask']): void;
   toolNames: string[];
-  /** Jira's state, for the startup line. */
-  jira: string;
+  /** MCP services and their state, for the startup line. */
+  services: string;
   folders: string[];
   dryRun: boolean;
 }
@@ -51,7 +57,7 @@ export interface OpenedConversation {
  */
 export async function openConversation(
   config: Config,
-  options: { local?: boolean; projectDir?: string } = {},
+  options: { local?: boolean; projectDir?: string; selfTest?: boolean } = {},
 ): Promise<OpenedConversation> {
   const { jarvis } = config;
   let model: ReplyModel;
@@ -59,6 +65,25 @@ export async function openConversation(
   let brain: string;
   let files: MemoryFiles;
   let memory: string;
+  // MCP servers for the Claude CLI. Every call they make is sent to the
+  // permit server first, which runs the gate below (set up further down).
+  let permitHandler: ConstructorParameters<typeof PermitServer>[1] = async () => ({
+    allow: false,
+    message: 'Jarvis is still starting.',
+  });
+  const mcpNames: Record<string, string> = {};
+  const cliServers: Record<string, CliMcpServer> = {};
+  for (const [name, server] of Object.entries(config.mcp.servers)) {
+    if (!server.enabled) continue;
+    const cliName = server.type === 'http' ? (server.signInAs ?? name) : name;
+    mcpNames[name] = cliName;
+    cliServers[cliName] =
+      server.type === 'http'
+        ? { type: 'http', url: server.url }
+        : { type: 'stdio', command: server.command, args: server.args };
+  }
+  const permit = new PermitServer(mcpNames, (tool, input) => permitHandler(tool, input));
+  let mcp: CliMcp | undefined;
 
   if (jarvis.brain.provider === 'claude-cli') {
     const exe = jarvis.brain.cliPath ?? findClaudeExe();
@@ -67,10 +92,15 @@ export async function openConversation(
         'Claude Code (claude.exe) was not found. Install it and sign in with "claude", or set brain.cliPath.',
       );
     }
+    if (Object.keys(cliServers).length > 0) {
+      await permit.start();
+      mcp = { servers: cliServers, env: permit.env, hidden: [] };
+    }
     model = new ClaudeCliReplyModel({
       exe,
       workDir: path.join(jarvis.dataDir, 'cli'),
       idleStopMs: jarvis.brain.idleStopSeconds * 1000,
+      mcp,
     });
     // Its own process, so classifying never mixes into the conversation.
     classifierModel = new ClaudeCliReplyModel({
@@ -138,18 +168,7 @@ export async function openConversation(
     mkdirSync(folders[0], { recursive: true });
     tools.push(...fileTools(folders));
   }
-  let jira = 'not set up (jira.site and jira.email in jarvis.yaml)';
-  if (jarvis.jira.site && jarvis.jira.email) {
-    const token = await readSecret('jira');
-    if (token) {
-      tools.push(
-        ...jiraTools(new JiraClient({ site: jarvis.jira.site, email: jarvis.jira.email, token })),
-      );
-      jira = jarvis.jira.site;
-    } else {
-      jira = 'no API token yet (npm run set-key -- jira)';
-    }
-  }
+  permitHandler = (tool, input) => gated.permit(tool, input);
 
   const actions = jarvis.apps.enabled
     ? windowsTools({
@@ -185,8 +204,37 @@ export async function openConversation(
     classifierTimeoutMs: jarvis.routing.classifierTimeoutSeconds * 1000,
   });
   const close = async () => {
-    await Promise.allSettled([model.close?.(), classifierModel.close?.()]);
+    await Promise.allSettled([model.close?.(), classifierModel.close?.(), permit.close()]);
   };
+
+  // Startup self-test (CLAUDE.md 4): no built-in tools, MCP only from the
+  // servers above, and tools with no tier in permissions.yaml hidden.
+  let services = Object.keys(mcpNames).length ? 'not checked' : 'none';
+  if (options.selfTest && model instanceof ClaudeCliReplyModel) {
+    let init: Awaited<ReturnType<ClaudeCliReplyModel['selfTest']>>;
+    try {
+      init = await model.selfTest(config.models.tiers.simple);
+    } catch (err) {
+      await close();
+      throw new LockdownError(`Startup self-test failed: ${(err as Error).message}`);
+    }
+    const unlisted = init.toolNames.filter((t) => {
+      const name = jarvisToolName(t, mcpNames);
+      return !name || !Object.hasOwn(config.permissions.tools, name);
+    });
+    model.hideTools(unlisted);
+    services =
+      Object.entries(mcpNames)
+        .map(([name, cliName]) => {
+          const status = init.servers.find((s) => s.name === cliName)?.status ?? 'missing';
+          if (status === 'connected') return name;
+          if (status === 'needs-auth')
+            return `${name} (not connected: if it lasts, sign in once in Claude Code with /mcp)`;
+          return `${name} (${status})`;
+        })
+        .join(', ') || 'none';
+    if (unlisted.length) services += `; hidden, no tier: ${unlisted.join(', ')}`;
+  }
   return {
     conversation,
     learner,
@@ -203,7 +251,7 @@ export async function openConversation(
       approve = fn;
     },
     toolNames: [...tools, ...actions].map((t) => t.name),
-    jira,
+    services,
     folders,
     dryRun: process.env.JARVIS_DRY_RUN === '1',
   };

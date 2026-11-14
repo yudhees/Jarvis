@@ -155,7 +155,12 @@ describe('LocalMemoryFiles', () => {
 
 describe('startup self-test (CLAUDE.md 4)', () => {
   it('passes when the CLI sees no tools and no MCP servers', async () => {
-    assert.deepEqual(await model().selfTest('claude-haiku-5-5', 5000), { tools: 0, mcpServers: 0 });
+    assert.deepEqual(await model().selfTest('claude-haiku-5-5', 5000), {
+      tools: 0,
+      mcpServers: 0,
+      toolNames: [],
+      servers: [],
+    });
   });
 
   it('refuses when the CLI can see any tool', async () => {

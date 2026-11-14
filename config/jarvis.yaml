@@ -53,10 +53,6 @@ files:
   # File tools work only inside these folders (decided 2026-11-14). %VARS% are expanded.
   allowedFolders: ["%USERPROFILE%/Documents/Jarvis"]
 
-jira: # Jira Cloud. Token: npm run set-key -- jira (id.atlassian.com > Security > API tokens)
-  site: null # e.g. https://yourcompany.atlassian.net
-  email: null # the email you sign in to Atlassian with
-
 retention:
   transcriptDays: 30
 

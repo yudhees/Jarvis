@@ -16,6 +16,18 @@ const VOICED = 0.5;
 const VOICED_SHARE = 0.7;
 /** Extra frames of slack in the window, for short gaps between words. */
 const WINDOW_SLACK = 5;
+/**
+ * At the start of each reply, Jarvis only learns how loud its own voice is at
+ * the mic and never counts it as the user. People rarely interrupt in the
+ * first half second, and on loud speakers the echo is far above the first guess.
+ */
+const GRACE_MS = 700;
+/** How fast the echo estimate follows during the grace period. */
+const GRACE_RATE = 0.3;
+/** A false interrupt (Jarvis heard itself): assume the echo is this much louder. */
+const FALSE_ALARM_DB = 6;
+/** The echo estimate never goes above this (mic 20 dB louder than playback). */
+const MAX_ECHO_GAP_DB = 20;
 
 export interface BargeInOptions {
   frameMs: number;
@@ -41,7 +53,10 @@ export class BargeIn {
   readonly #needVoiced: number;
   readonly #window: number;
   readonly #rate: number;
+  readonly #graceFrames: number;
   #echoGap = START_ECHO_GAP_DB;
+  /** Playing frames heard since reset(), for the grace period. */
+  #playedFrames = 0;
   /** Recent frames: 0 quiet or noise, 1 loud, 2 loud and voiced. */
   #recent: number[] = [];
 
@@ -50,11 +65,27 @@ export class BargeIn {
     this.#needVoiced = Math.max(1, Math.ceil(this.#need * VOICED_SHARE));
     this.#window = this.#need + WINDOW_SLACK;
     this.#rate = o.sampleRate;
+    this.#graceFrames = Math.ceil(GRACE_MS / o.frameMs);
   }
 
   /** Starts a new busy period (keeps the learned echo level). */
   reset(): void {
     this.#recent = [];
+    this.#playedFrames = 0;
+  }
+
+  /** The learned echo gap in dB (mic level minus played level), for tests and logs. */
+  get echoGapDb(): number {
+    return this.#echoGap;
+  }
+
+  /**
+   * What was taken for the user turned out to be Jarvis's own words: the echo
+   * is louder than learned, so be stricter from now on.
+   */
+  falseAlarm(): void {
+    this.#echoGap = Math.min(this.#echoGap + FALSE_ALARM_DB, MAX_ECHO_GAP_DB);
+    this.reset();
   }
 
   /**
@@ -68,9 +99,14 @@ export class BargeIn {
     let user = mic > Math.max((floorDbfs ?? -70) + ABOVE_FLOOR_DB, MIN_USER_DBFS);
     if (isPlaying) {
       const gap = mic - out;
-      user &&= gap > this.#echoGap + ABOVE_ECHO_DB;
-      // Learn the echo: follow it down quickly, up only slowly.
-      this.#echoGap += (gap - this.#echoGap) * (gap < this.#echoGap ? 0.2 : 0.02);
+      const grace = this.#playedFrames++ < this.#graceFrames;
+      user &&= !grace && gap > this.#echoGap + ABOVE_ECHO_DB;
+      // Learn the echo. During the grace period: up quickly, down slowly, so it
+      // settles near the loudest echo. After it: down quickly, up only slowly, so
+      // the user's voice barely moves it.
+      const up = gap > this.#echoGap;
+      const rate = grace ? (up ? GRACE_RATE : 0.05) : up ? 0.02 : 0.2;
+      this.#echoGap = Math.min(this.#echoGap + (gap - this.#echoGap) * rate, MAX_ECHO_GAP_DB);
     }
     const mark = !user ? 0 : voicing(frame, this.#rate) >= VOICED ? 2 : 1;
     this.#recent.push(mark);

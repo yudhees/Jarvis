@@ -27,23 +27,52 @@ function said(content: string, noun: string): string {
   return n > SPOKEN_WORDS ? `a ${n}-word ${noun}` : `${noun} saying: ${content}`;
 }
 
+/** Inputs that say nothing to a listener. */
+const NOISE = new Set(['cloudId', 'contentFormat', 'responseContentFormat', 'actionSource']);
+
+/** "mcp__atlassian__createJiraIssue" -> "create Jira issue". */
+function spokenTool(tool: string): string {
+  return tool
+    .replace(/^mcp__.+?__/, '')
+    .replace(/_/g, ' ')
+    .replace(/([a-z])([A-Z])/g, (_, a: string, b: string) => `${a} ${b.toLowerCase()}`)
+    .replace(/\bjira\b/g, 'Jira');
+}
+
 type Template = (i: Record<string, unknown>) => { action: string; content?: string };
 
 const TEMPLATES: Record<string, Template> = {
-  jira_transition: (i) => ({ action: `move ${str(i.issue)} to ${str(i.status)}` }),
-  jira_comment: (i) => {
-    const body = str(i.body, '');
-    return { action: `add to ${str(i.issue)} a ${said(body, 'comment')}`, content: body };
-  },
-  jira_create: (i) => {
-    const desc = str(i.description, '');
+  // Jira through the Atlassian MCP server (tool names as in permissions.yaml).
+  mcp__atlassian__transitionJiraIssue: (i) => {
+    const id = (i.transition as { id?: unknown } | undefined)?.id;
     return {
-      action: `create a ${str(i.type, 'task').toLowerCase()} in ${str(i.project)} titled: ${str(i.summary)}`,
+      action: `change the status of ${str(i.issueIdOrKey)} (Jira transition ${str(id, 'unknown')})`,
+    };
+  },
+  mcp__atlassian__addCommentToJiraIssue: (i) => {
+    const body = str(i.commentBody, '');
+    const verb = i.commentId ? 'replace a comment on' : 'add to';
+    return { action: `${verb} ${str(i.issueIdOrKey)} a ${said(body, 'comment')}`, content: body };
+  },
+  mcp__atlassian__createJiraIssue: (i) => {
+    const desc = typeof i.description === 'string' ? i.description : '';
+    return {
+      action: `create a ${str(i.issueTypeName, 'task').toLowerCase()} in ${str(i.projectKey)} titled: ${str(i.summary)}`,
       content: desc,
     };
   },
-  jira_assign: (i) => ({
-    action: `assign ${str(i.issue)} to ${i.assignee === null || i.assignee === '' ? 'nobody' : str(i.assignee)}`,
+  mcp__atlassian__editJiraIssue: (i) => {
+    const fields = i.fields && typeof i.fields === 'object' ? Object.keys(i.fields) : [];
+    return {
+      action: `change ${fields.join(', ').replace(/_/g, ' ') || 'fields'} on ${str(i.issueIdOrKey)}`,
+      content: JSON.stringify(i.fields ?? {}, null, 2),
+    };
+  },
+  mcp__atlassian__addWorklogToJiraIssue: (i) => ({
+    action: `log ${str(i.timeSpent)} of work on ${str(i.issueIdOrKey)}`,
+  }),
+  mcp__atlassian__createIssueLink: (i) => ({
+    action: `link ${str(i.inwardIssue)} and ${str(i.outwardIssue)} as ${str(i.type)}`,
   }),
   file_write: (i) => {
     const text = str(i.content, '');
@@ -72,12 +101,13 @@ export function approvalText(tool: string, input: Record<string, unknown>): Appr
   } else {
     // No template yet: name the tool and its values plainly, never a model summary.
     const parts = Object.entries(input)
+      .filter(([k]) => !NOISE.has(k))
       .slice(0, 4)
       .map(
         ([k, v]) =>
           `${k.replace(/_/g, ' ')} ${typeof v === 'string' ? said(v, 'text').replace(/^text saying: /, '') : JSON.stringify(v)}`,
       );
-    action = `use ${tool.replace(/_/g, ' ')} with ${parts.join(', ') || 'no details'}`;
+    action = `use ${spokenTool(tool)} with ${parts.join(', ') || 'no details'}`;
   }
   const sentence = `I'm about to ${action}.`;
   return { sentence, fullText: content ? `${sentence}\n\n${content}` : sentence };

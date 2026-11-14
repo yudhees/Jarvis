@@ -32,7 +32,13 @@ const stdioServer = z.strictObject({
 });
 const httpServer = z.strictObject({
   type: z.literal('http'),
-  url: z.url(),
+  url: z.url().refine((u) => u.startsWith('https://'), 'must be https'),
+  /**
+   * The name Claude Code saved this server's sign-in under (for example
+   * plugin:engineering:atlassian). The Claude CLI reuses that sign-in; Jarvis
+   * never reads it. Without it, the server is used under its own name here.
+   */
+  signInAs: z.string().min(1).optional(),
   enabled: z.boolean().default(true),
 });
 export const mcpSchema = z.strictObject({
@@ -103,17 +109,6 @@ export const jarvisSchema = z.strictObject({
   }),
   files: z.strictObject({
     allowedFolders: z.array(z.string().min(1)),
-  }),
-  /** Jira Cloud (phase 3). The API token lives in Credential Manager: npm run set-key -- jira */
-  jira: z.strictObject({
-    site: z
-      .string()
-      .regex(
-        /^https:\/\/[\w.-]+\.atlassian\.net\/?$/,
-        'must look like https://yourcompany.atlassian.net',
-      )
-      .nullable(),
-    email: z.email().nullable(),
   }),
   retention: z.strictObject({
     transcriptDays: positiveInt,

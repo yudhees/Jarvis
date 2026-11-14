@@ -3,6 +3,12 @@ import { existsSync, mkdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
+import {
+  cliToolPrefix,
+  PERMIT_SCRIPT,
+  PERMIT_SERVER,
+  PERMIT_TOOL,
+} from '../agent/permit-server.ts';
 import type {
   ChatMessage,
   LocalTool,
@@ -33,6 +39,76 @@ export interface ClaudeCliOptions {
   idleStopMs: number;
   /** Arguments before Jarvis's own (tests run a fake CLI through node). */
   prefixArgs?: readonly string[];
+  /**
+   * MCP servers the CLI may use (Jira through Atlassian, ...). Every call they
+   * make is first sent to Jarvis's gate through the permission tool
+   * (`env` tells it where core listens). Without this, the CLI has no tools.
+   */
+  mcp?: CliMcp;
+}
+
+export type CliMcpServer =
+  | { type: 'http'; url: string }
+  | { type: 'stdio'; command: string; args: string[] };
+
+export interface CliMcp {
+  /** Keyed by the name the CLI knows the server by (its saved sign-in goes with the name). */
+  servers: Readonly<Record<string, CliMcpServer>>;
+  /** JARVIS_PERMIT_URL and JARVIS_PERMIT_TOKEN for the permission tool. */
+  env: Readonly<Record<string, string>>;
+  /** Tools to hide from the model (no tier in permissions.yaml). */
+  hidden: string[];
+}
+
+/** What the CLI reported at start. */
+export interface CliInit {
+  tools: number;
+  mcpServers: number;
+  toolNames: string[];
+  servers: { name: string; status: string }[];
+}
+
+/** CLI helpers that would let the model read MCP resources around the gate. */
+const ALWAYS_HIDDEN = ['ListMcpResourcesTool', 'ReadMcpResourceTool', 'ReadMcpResourceDirTool'];
+
+function mcpArgs(mcp: CliMcp | undefined): string[] {
+  if (!mcp) return ['--strict-mcp-config'];
+  const config = {
+    mcpServers: {
+      ...mcp.servers,
+      [PERMIT_SERVER]: { type: 'stdio', command: process.execPath, args: [PERMIT_SCRIPT] },
+    },
+  };
+  return [
+    '--strict-mcp-config',
+    '--mcp-config',
+    JSON.stringify(config),
+    // Every tool call is asked of Jarvis's gate; no tool is pre-allowed.
+    '--permission-mode',
+    'default',
+    '--permission-prompt-tool',
+    PERMIT_TOOL,
+    '--disallowed-tools',
+    ...ALWAYS_HIDDEN,
+    PERMIT_TOOL,
+    ...mcp.hidden,
+  ];
+}
+
+/**
+ * The lockdown check on the CLI's init report (CLAUDE.md 4). No built-in
+ * tools ever; MCP tools only from the servers Jarvis gave it. Returns why it
+ * fails, or undefined.
+ */
+export function lockdownProblem(init: CliInit, mcp: CliMcp | undefined): string | undefined {
+  const allowed = Object.keys(mcp?.servers ?? {});
+  const prefixes = allowed.map(cliToolPrefix);
+  const stray = init.toolNames.filter((t) => !prefixes.some((p) => t.startsWith(p)));
+  const strayServers = init.servers
+    .map((s) => s.name)
+    .filter((n) => !allowed.includes(n) && !(mcp && n === PERMIT_SERVER));
+  if (stray.length === 0 && strayServers.length === 0) return undefined;
+  return `Lockdown failed: the Claude CLI can see ${stray.length} tools and ${strayServers.length} MCP servers it should not (${[...stray, ...strayServers].slice(0, 5).join(', ')}).`;
 }
 
 /** Lookups the CLI cannot call as tools; it asks with a marker line instead. */
@@ -74,6 +150,9 @@ interface Turn {
   onText: (delta: string) => void;
   text: string;
   usage: { input: number; output: number };
+  /** Output tokens of the message in progress (a turn can hold several around tool calls). */
+  messageOut: number;
+  stopReason: string | null;
   resolve: (r: { text: string; usage: { input: number; output: number } }) => void;
   reject: (err: Error) => void;
   settled: boolean;
@@ -85,12 +164,13 @@ class CliSession {
   readonly system: string;
   /** Our view of what this process has already seen. */
   sent: ChatMessage[] = [];
-  /** What the CLI reported at start: how many tools and MCP servers it can see. */
-  init: { tools: number; mcpServers: number } | undefined;
-  readonly #initWaiters: ((init: { tools: number; mcpServers: number }) => void)[] = [];
+  /** What the CLI reported at start: the tools and MCP servers it can see. */
+  init: CliInit | undefined;
+  readonly #initWaiters: ((init: CliInit) => void)[] = [];
+  readonly #mcp: CliMcp | undefined;
 
   /** Resolves with the CLI's init report (the lockdown self-test reads it). */
-  waitForInit(timeoutMs: number): Promise<{ tools: number; mcpServers: number }> {
+  waitForInit(timeoutMs: number): Promise<CliInit> {
     if (this.init) return Promise.resolve(this.init);
     return new Promise((resolve, reject) => {
       const timer = setTimeout(
@@ -113,12 +193,16 @@ class CliSession {
   constructor(o: ClaudeCliOptions, model: string, system: string) {
     this.model = model;
     this.system = system;
+    this.#mcp = o.mcp;
     mkdirSync(o.workDir, { recursive: true });
     // Never let an API key in the environment switch the CLI to API billing:
     // Jarvis uses the user's Claude subscription login only.
     const env = { ...process.env };
     delete env.ANTHROPIC_API_KEY;
     delete env.ANTHROPIC_AUTH_TOKEN;
+    // Only the servers Jarvis names; never the claude.ai connectors.
+    env.ENABLE_CLAUDEAI_MCP_SERVERS = 'false';
+    Object.assign(env, o.mcp?.env);
     this.#proc = spawn(
       o.exe,
       [
@@ -126,11 +210,12 @@ class CliSession {
         '-p',
         '--model',
         model,
-        // Lockdown (CLAUDE.md 4): no built-in tools, no MCP servers, no
-        // settings, hooks, skills or slash commands, nothing saved.
+        // Lockdown (CLAUDE.md 4): no built-in tools, no settings, hooks,
+        // skills or slash commands, nothing saved; MCP servers only as given,
+        // each call checked by Jarvis's gate first.
         '--tools',
         '',
-        '--strict-mcp-config',
+        ...mcpArgs(o.mcp),
         '--setting-sources',
         '',
         '--disable-slash-commands',
@@ -176,6 +261,8 @@ class CliSession {
         onText,
         text: '',
         usage: { input: 0, output: 0 },
+        messageOut: 0,
+        stopReason: null,
         resolve,
         reject,
         settled: false,
@@ -197,11 +284,11 @@ class CliSession {
       subtype?: string;
       is_error?: boolean;
       tools?: unknown[];
-      mcp_servers?: unknown[];
+      mcp_servers?: { name?: unknown; status?: unknown }[];
       result?: string;
       event?: {
         type?: string;
-        delta?: { type?: string; text?: string };
+        delta?: { type?: string; text?: string; stop_reason?: string | null };
         usage?: { input_tokens?: number; output_tokens?: number };
         message?: { usage?: { input_tokens?: number } };
       };
@@ -216,18 +303,23 @@ class CliSession {
       return;
     }
     if (event.type === 'system' && event.subtype === 'init') {
-      // Lockdown check (CLAUDE.md 4): the CLI must see no tools and no MCP
-      // servers. Jarvis runs every tool itself, behind its gate.
-      const tools = event.tools ?? [];
-      const servers = event.mcp_servers ?? [];
-      const init = { tools: tools.length, mcpServers: servers.length };
+      // Lockdown check (CLAUDE.md 4): no built-in tools, and MCP only from
+      // the servers Jarvis gave it (each call goes through Jarvis's gate).
+      const toolNames = (event.tools ?? []).map(String);
+      const servers = (event.mcp_servers ?? []).map((s) => ({
+        name: String(s?.name),
+        status: String(s?.status),
+      }));
+      const init: CliInit = {
+        tools: toolNames.length,
+        mcpServers: servers.length,
+        toolNames,
+        servers,
+      };
       this.init = init;
-      if (tools.length > 0 || servers.length > 0) {
-        this.#die(
-          new Error(
-            `Lockdown failed: the Claude CLI can see ${tools.length} tools and ${servers.length} MCP servers.`,
-          ),
-        );
+      const problem = lockdownProblem(init, this.#mcp);
+      if (problem) {
+        this.#die(new Error(problem));
         this.#proc.kill();
       }
       for (const w of this.#initWaiters.splice(0)) w(init);
@@ -242,17 +334,24 @@ class CliSession {
         turn.onText(delta.text);
       }
     } else if (event.type === 'stream_event' && event.event?.type === 'message_start') {
-      turn.usage.input = event.event.message?.usage?.input_tokens ?? 0;
+      // A turn can hold several messages around MCP tool calls.
+      turn.usage.input += event.event.message?.usage?.input_tokens ?? 0;
+      turn.usage.output += turn.messageOut;
+      turn.messageOut = 0;
+      turn.stopReason = null;
+      if (turn.text && !/\s$/.test(turn.text) && !turn.settled) {
+        turn.text += ' ';
+        turn.onText(' ');
+      }
     } else if (event.type === 'stream_event' && event.event?.type === 'message_delta') {
-      turn.usage.output = event.event.usage?.output_tokens ?? turn.usage.output;
+      turn.messageOut = event.event.usage?.output_tokens ?? turn.messageOut;
+      turn.stopReason = event.event.delta?.stop_reason ?? turn.stopReason;
     } else if (event.type === 'stream_event' && event.event?.type === 'message_stop') {
-      // Earliest sign the reply is complete; the CLI's own summary comes later.
-      this.#settle(turn);
+      // Earliest sign the reply is complete, unless the model is calling a
+      // tool and will go on after it. The CLI's own summary comes later.
+      if (turn.stopReason !== 'tool_use') this.#settle(turn);
     } else if (event.type === 'assistant' && event.message?.stop_reason) {
-      // The reply is complete; the CLI sends its "result" a moment later.
-      const u = event.message.usage;
-      turn.usage = { input: u?.input_tokens ?? 0, output: u?.output_tokens ?? 0 };
-      this.#settle(turn);
+      if (event.message.stop_reason !== 'tool_use') this.#settle(turn);
     } else if (event.type === 'result') {
       this.#turns.shift();
       if (event.is_error) {
@@ -269,6 +368,8 @@ class CliSession {
   #settle(turn: Turn): void {
     if (turn.settled) return;
     turn.settled = true;
+    turn.usage.output += turn.messageOut;
+    turn.messageOut = 0;
     turn.resolve({ text: turn.text, usage: turn.usage });
   }
 
@@ -319,7 +420,7 @@ export class ClaudeCliReplyModel implements ReplyModel {
     const system = this.#systemFor(req.system, tools);
     const earlier = req.messages.slice(0, -1);
     const last = req.messages.at(-1);
-    if (!last || last.role !== 'user') throw new Error('the last message must be from the user');
+    if (last?.role !== 'user') throw new Error('the last message must be from the user');
 
     let s = this.#session;
     let message: string;
@@ -402,24 +503,23 @@ export class ClaudeCliReplyModel implements ReplyModel {
    * Startup self-test: starts the CLI once and checks its init report lists no
    * tools and no MCP servers. Throws if the lockdown is not in place.
    */
-  async selfTest(
-    model: string,
-    timeoutMs = 20_000,
-  ): Promise<{ tools: number; mcpServers: number }> {
+  async selfTest(model: string, timeoutMs = 30_000): Promise<CliInit> {
     const session = new CliSession(this.#o, model, 'Reply with the single word OK.');
     try {
       // The CLI reports its tools only once it gets a message: one tiny request.
       session.ask('OK?', () => {}).catch(() => {});
       const init = await session.waitForInit(timeoutMs);
-      if (init.tools > 0 || init.mcpServers > 0) {
-        throw new Error(
-          `Lockdown failed: the Claude CLI can see ${init.tools} tools and ${init.mcpServers} MCP servers.`,
-        );
-      }
+      const problem = lockdownProblem(init, this.#o.mcp);
+      if (problem) throw new Error(problem);
       return init;
     } finally {
       session.kill();
     }
+  }
+
+  /** Hides tools from every later session (the self-test found them unlisted). */
+  hideTools(names: readonly string[]): void {
+    if (this.#o.mcp) this.#o.mcp.hidden.push(...names);
   }
 
   async close(): Promise<void> {

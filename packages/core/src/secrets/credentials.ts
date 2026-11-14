@@ -2,13 +2,12 @@ import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 
 /** Keys Jarvis knows about. Stored as "jarvis:<name>" in Windows Credential Manager. */
-export const SECRET_NAMES = ['anthropic', 'picovoice', 'jira'] as const;
+export const SECRET_NAMES = ['anthropic', 'picovoice'] as const;
 export type SecretName = (typeof SECRET_NAMES)[number];
 
 export const SECRET_HELP: Record<SecretName, string> = {
   anthropic: 'Anthropic API key (console.anthropic.com > API keys)',
   picovoice: 'Picovoice AccessKey (console.picovoice.ai)',
-  jira: 'Atlassian API token (id.atlassian.com > Security > API tokens)',
 };
 
 const SCRIPT = path.join(import.meta.dirname, 'credman.ps1');
