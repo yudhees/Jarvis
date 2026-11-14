@@ -1,3 +1,10 @@
+export {
+  Endpointer,
+  type EndpointerOptions,
+  type EndpointResult,
+  NoiseFloor,
+} from './endpointer.ts';
+export { type Keyword, type KeywordSpotter, PorcupineSpotter } from './keywords.ts';
 export { meterBar, rmsLevel, SILENCE_DBFS, toDbfs } from './levels.ts';
 export { Microphone } from './microphone.ts';
 export type { AudioPlayer, PlayOptions, PlayResult } from './playback.ts';

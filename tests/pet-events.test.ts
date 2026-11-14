@@ -38,7 +38,7 @@ describe('parseCoreEvent (what the pet accepts from core)', () => {
   it('the demo only uses events the pet accepts, stops to ask, and ends asleep', () => {
     const first = demoScript().filter((s) => 'event' in s);
     assert.equal(
-      first.at(-1) && 'event' in first.at(-1)! ? first.at(-1)!.event.type : '',
+      ((last) => (last && 'event' in last ? last.event.type : ''))(first.at(-1)),
       'input_request',
     );
     const steps = demoFinish('PROJ · Platform', 'Login times out');

@@ -528,7 +528,31 @@ Needed by phase 4 / 6:
 
 ## 18. Status
 
-**Phase 0: done (awaiting user sign-off).** Phase 1 not started.
+**Phase 0: done (awaiting user sign-off).** **Phase 1: built and unit-tested; not yet tried live.** It needs the Anthropic and Picovoice keys: `npm run set-key -- anthropic` and `npm run set-key -- picovoice`.
+
+Phase 1 (`npm start`, `npm run repl`):
+- `VoiceLoop` (core/src/voice/loop.ts): one mic stream feeds everything. Porcupine hears every frame, even while Jarvis is thinking or speaking, so "Jarvis" or the stop keyword always interrupts. States follow section 6 through `StateMachine` (state/machine.ts). Speech-to-text never runs on Jarvis's own voice.
+- `Endpointer` (audio/endpointer.ts): an energy check against the room's noise floor, measured while asleep (`NoiseFloor`). 800 ms of quiet ends the request; no speech within 5 s of the wake word sends Jarvis back to sleep; recordings stop at 15 s. Proper VAD is phase 5.
+- Wake word: the built-in "jarvis" (`keywords.wake`). There's no stop .ppn yet, so saying "Jarvis" while it speaks interrupts it and listens, and "Jarvis, stop" then stops it as a spoken command.
+- Spoken commands must be the whole utterance (voice/commands.ts): stop, sleep, mute, and "what are you doing". The conversation handles "Jarvis, use Opus".
+- `Conversation` (voice/conversation.ts) handles, in order:
+  - learner statements first, then model commands;
+  - Haiku-first routing (the classifier isn't called yet; that's phase 2);
+  - replies streamed and spoken a sentence at a time (`SentenceSplitter`), with `SpeechQueue` synthesizing the next sentence while the current one plays;
+  - `[[ESCALATE]]` retried one tier up and never spoken aloud;
+  - "Still working on it" if nothing has been spoken after `latency.normalSeconds`.
+- Small context:
+  - Skills are listed by name and description only. The model reads a skill's full text with `skill_read` and recalls notes with `memory_search`.
+  - Both tools are read-only, run by Jarvis itself, and set to tier 0 in permissions.yaml. They're offered only while they stay at tier 0, because the approval gate comes in phase 3.
+  - Tool exchanges aren't kept in the conversation history, and the "About the user" block stays capped at 300 tokens.
+- Keys live in Windows Credential Manager as Generic credentials `jarvis:anthropic` and `jarvis:picovoice` (secrets/credman.ps1). `npm run set-key -- <name>` asks for the key in a hidden PowerShell prompt, so Node never sees it; `--check` shows which keys are saved. This settles the section 17 decision: a PowerShell bridge, no native module.
+- Hotkeys are registered by core (hotkey/hotkey-host.ps1, a RegisterHotKey message loop): Ctrl+Alt+J stops, Ctrl+Alt+M toggles mute. Registering takes about 0.7 s.
+- Whisper starts loading when the wake word is heard, while the user is still talking.
+- If the Claude Memory Store can't be opened, memory falls back to a temporary store.
+- Not done in phase 1:
+  - core's WebSocket bridge to the pet (phase 4; the console shows events for now);
+  - measuring against the 3-second end-to-end target;
+  - live Porcupine and Claude calls (no keys on this PC yet).
 
 **Built ahead of plan (no audio or model calls needed), all tested:**
 - Memory on the Claude Memory Store (13), with local in-memory fallback. Not yet run against the live store: no Anthropic API key on this PC yet.
@@ -544,11 +568,11 @@ Needed by phase 4 / 6:
 - `packages/pet/preview/pet-preview.html`: the browser preview used to agree the look.
 - Speech-to-text (phase 1 piece): whisper.cpp b5454 installed by `npm run setup-whisper` from the official GitHub release and Hugging Face, both SHA-256 checked, into `%APPDATA%\jarvis` (12 MB program after pruning, 78 MB model `ggml-base.en-q8_0.bin`). `WhisperCppStt` runs `whisper-server` on 127.0.0.1 with the model loaded (about 0.4 s to start, about 140 MB RAM) and unloads it after 60 s idle. Audio is sent in memory, never written to disk. `npm run stt-test`: Windows voice into Whisper, 96% of words right (misses were "PROJ142" and "10" for "ten"), about 1 s per request on this CPU. Not yet tried with the user's own voice: `npm run stt-test -- --mic 5`.
 - Footprint measured 2026-11-14: whisper 12 MB + model 78 MB on disk; pet about 116 MB private RAM (Electron, GPU process off); Electron's 144 MB download cache deleted.
-- 130 tests pass.
+- 153 tests pass. Phase 1 added tests for the state machine, endpointer, spoken commands, sentence splitting, the conversation (escalation, retrieval tools, stop mid-reply), and the voice loop with a fake mic, keywords, speech and playback.
 
-Kept lightweight: Node 22.18+ runs the TypeScript directly (type stripping, no build step, no tsx), tests use the built-in `node:test`, and Biome is the only lint/format tool. Dev deps: `typescript`, `@types/node`, `@biomejs/biome`. Runtime deps: `zod`, `yaml`, `@picovoice/pvrecorder-node`, `@picovoice/pvspeaker-node`.
+Kept lightweight: Node 22.18+ runs the TypeScript directly (type stripping, no build step, no tsx), tests use the built-in `node:test`, and Biome is the only lint/format tool. Dev deps: `typescript`, `@types/node`, `@biomejs/biome`. Runtime deps: `zod`, `yaml`, `@anthropic-ai/sdk`, `@picovoice/pvrecorder-node`, `@picovoice/pvspeaker-node`, `@picovoice/porcupine-node` (4.0.2, 7 MB, prebuilt).
 
-Commands: `npm run check` (typecheck + lint + tests), `npm run mic-test`, `npm run speaker-test` (both take `--list` and `--device N`).
+Commands: `npm run check` (typecheck + lint + tests), `npm start`, `npm run repl` (`--speak`, `--local`), `npm run set-key`, `npm run mic-test`, `npm run speaker-test` (both take `--list` and `--device N`), `npm run stt-test`.
 
 What works:
 - npm workspaces `shared`, `core`, `pet` (pet is an empty placeholder until phase 4).

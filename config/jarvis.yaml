@@ -12,6 +12,13 @@ audio:
 listening:
   maxRecordSeconds: 15
   followUpSeconds: 8
+  silenceMs: 800 # this much quiet ends what you are saying
+  startTimeoutSeconds: 5 # after "Jarvis", give up if you say nothing
+
+keywords: # Porcupine (needs a Picovoice AccessKey: npm run set-key -- picovoice)
+  wake: jarvis # built-in keyword; later a custom "Hi Jarvis" .ppn path
+  stop: null # path to a "Jarvis stop" .ppn; null = saying "Jarvis" interrupts
+  sensitivity: 0.5 # 0..1, higher wakes more easily (and falsely)
 
 approval:
   timeoutSeconds: 20
@@ -57,7 +64,7 @@ learning:
 # Jarvis may follow. Only the best matches for a request are loaded.
 skills:
   enabled: true
-  maxPerRequest: 2
+  maxPerRequest: 2 # skills listed by name per request; Jarvis reads one only when it needs it
   # Skills about operating Claude Code itself; not useful for a voice assistant.
   exclude:
     - using-superpowers

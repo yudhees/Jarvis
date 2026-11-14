@@ -21,7 +21,10 @@
     "learn-repl": "node scripts/learn-repl.ts",
     "pet": "npm start -w @jarvis/pet",
     "setup-whisper": "node scripts/setup-whisper.ts",
-    "stt-test": "node scripts/stt-test.ts"
+    "stt-test": "node scripts/stt-test.ts",
+    "set-key": "node scripts/set-key.ts",
+    "start": "node packages/core/src/main.ts",
+    "repl": "node scripts/repl.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.4",

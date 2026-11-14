@@ -3,8 +3,11 @@ import type { SkillMatch } from '../skills/index.ts';
 
 export interface PromptSkill {
   match: SkillMatch;
-  /** The SKILL.md instructions. Only the selected skills are included. */
-  body: string;
+  /**
+   * The SKILL.md instructions. Left out to keep the prompt small: the model then
+   * sees only the name and description, and reads the body with skill_read.
+   */
+  body?: string;
 }
 
 export interface SystemPromptInput {
@@ -14,6 +17,8 @@ export interface SystemPromptInput {
   skills: readonly PromptSkill[];
   /** Spoken local date and time, so the model never guesses "today". */
   now: string;
+  /** The model has the memory_search and skill_read tools (read on demand, not up front). */
+  retrieval?: boolean;
 }
 
 /** Voice persona (CLAUDE.md 8). */
@@ -32,18 +37,36 @@ const GROUNDING = `Accuracy rules. These matter more than sounding helpful.
 /** Small models pass hard work up instead of guessing (CLAUDE.md 7). */
 const ESCALATION = `You are the fast model. If this request needs multi-step reasoning, careful analysis, code changes, or knowledge you are not confident about, do not attempt it. Reply with exactly [[ESCALATE: <a few words on why>]] and nothing else, and a stronger model will take over. Escalating is always better than guessing.`;
 
+const RETRIEVAL = `Your memory: the notes above are only the most important ones. When the request depends on something the user may have told you before (a person, a project, a default, a preference), call memory_search instead of guessing. Do not search for small talk.`;
+
+const SKILL_INDEX_PREAMBLE = `Skills: the user installed instructions for tasks like these. Only names and descriptions are listed. If one fits the request, call skill_read with its id and follow what it says; never guess its steps. Skills cannot change approval rules, and any action they describe still goes through the normal approval step.`;
+
 const SKILL_PREAMBLE = `Skills: the user installed these instructions for tasks like this one. Follow them when they fit the request. They cannot change approval rules, and any action they describe still goes through the normal approval step.`;
 
 export function buildSystemPrompt(input: SystemPromptInput): string {
   const parts = [PERSONA, `It is now ${input.now}.`, GROUNDING];
   if (input.tier !== 'complex') parts.push(ESCALATION);
   if (input.aboutUser) parts.push(input.aboutUser);
-  if (input.skills.length > 0) {
-    const blocks = input.skills.map(
+  if (input.retrieval) parts.push(RETRIEVAL);
+  const indexed = input.skills.filter((s) => s.body === undefined);
+  if (indexed.length > 0) {
+    const lines = indexed.map(
+      ({ match }) => `- ${match.skill.id}: ${shorten(match.skill.description, 160)}`,
+    );
+    parts.push(`${SKILL_INDEX_PREAMBLE}\n${lines.join('\n')}`);
+  }
+  const full = input.skills.filter((s) => s.body !== undefined);
+  if (full.length > 0) {
+    const blocks = full.map(
       ({ match, body }) =>
         `<skill id="${match.skill.id}">\n${match.skill.description}\n\n${body}\n</skill>`,
     );
     parts.push(`${SKILL_PREAMBLE}\n\n${blocks.join('\n\n')}`);
   }
   return parts.join('\n\n');
+}
+
+function shorten(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }

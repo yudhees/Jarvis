@@ -4,6 +4,10 @@
 # Any tool NOT listed here is treated as tier 2. That default is fixed in code.
 # MCP tools are named mcp__<server name in mcp.yaml>__<tool name>.
 tools:
+  # --- Jarvis's own lookups (read-only; fetched on demand to keep prompts small) ---
+  memory_search: 0
+  skill_read: 0
+
   # --- Jira / Confluence (Atlassian MCP) ---
   mcp__atlassian__getAccessibleAtlassianResources: 0
   mcp__atlassian__atlassianUserInfo: 0

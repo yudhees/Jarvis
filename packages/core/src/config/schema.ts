@@ -54,6 +54,17 @@ export const jarvisSchema = z.strictObject({
   listening: z.strictObject({
     maxRecordSeconds: seconds,
     followUpSeconds: seconds,
+    /** Quiet time that ends what the user is saying. */
+    silenceMs: z.int().min(200).max(5000),
+    /** After the wake word, give up if no speech starts within this time. */
+    startTimeoutSeconds: seconds,
+  }),
+  keywords: z.strictObject({
+    /** Built-in Porcupine keyword name, or a path to a Windows .ppn file. */
+    wake: z.string().min(1),
+    /** Path to a "Jarvis stop" .ppn; null = the wake word also interrupts. */
+    stop: z.string().min(1).nullable(),
+    sensitivity: z.number().min(0).max(1),
   }),
   approval: z.strictObject({
     timeoutSeconds: seconds,
