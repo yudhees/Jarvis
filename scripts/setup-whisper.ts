@@ -191,3 +191,20 @@ console.log(
 console.log(
   `  runs:   ${v.status === 0 || /usage/i.test(`${v.stdout}${v.stderr}`) ? 'yes' : 'NO, see output above'}`,
 );
+
+// A packaged Windows app (like the Claude desktop app) gets a private copy of
+// AppData: files it writes there are invisible to your own terminal. Warn so
+// the install is not silently stranded.
+const localAppData = process.env.LOCALAPPDATA;
+const packages = localAppData ? path.join(localAppData, 'Packages') : '';
+const stranded =
+  packages && existsSync(packages)
+    ? readdirSync(packages)
+        .map((name) => path.join(packages, name, 'LocalCache', 'Roaming', 'jarvis'))
+        .filter((dir) => existsSync(dir))
+    : [];
+if (stranded.length > 0) {
+  console.log(
+    `\nWarning: this ran inside a packaged app, so Windows stored the files in its private folder:\n  ${stranded.join('\n  ')}\nRun "npm run setup-whisper" again from your own terminal (it re-uses nothing from there), then delete that folder.`,
+  );
+}
