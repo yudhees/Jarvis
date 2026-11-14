@@ -20,7 +20,7 @@ Non-goals for now: multiple users, mobile, cloud hosting, distributing the app t
 1. Install Node.js LTS (22.5 or later, for `node:sqlite`) and Git for Windows.
 2. Install Claude Code and sign in with `claude`.
 3. Create an Anthropic API key for Jarvis itself (see section 4, "Auth"). Store it in Windows Credential Manager, not in a file.
-4. Create a free Picovoice account and copy the AccessKey (needed for the wake word).
+4. Optional: a Picovoice AccessKey. Not needed: by default the wake word uses the speech recognizer built into Windows (Picovoice now reviews new accounts for commercial use, so a key is not instant).
 5. Create the project folder, save this file in it as `CLAUDE.md`, open a terminal there, and run `claude`.
 6. Tell Claude Code: **"Read CLAUDE.md and build phase 0."** Move on one phase at a time.
 
@@ -65,7 +65,7 @@ Core owns everything that must keep working without the pet: the kill switches, 
 | Part | Choice | Notes |
 |---|---|---|
 | Language | TypeScript, strict mode | npm workspaces: `core`, `pet`, `shared` |
-| Keyword spotting | `@picovoice/porcupine-node` | One Porcupine instance with several keywords (see 6.1). Start with the built-in "jarvis" keyword; add custom `.ppn` files ("Hi Jarvis", "Jarvis stop") for Windows from Picovoice Console |
+| Keyword spotting | Default: the speech recognizer built into Windows (System.Speech, `keywords.provider: windows`), no download and no account | A PowerShell host gets the mic audio over stdin. Grammars cover "(hey/hi/okay) Jarvis" and "Jarvis stop". Dictation acts as a garbage model, so ordinary speech is ignored unless it starts with "Jarvis"; that one-breath form replays the request audio from where the phrase began. Alternatives: `picovoice` (Porcupine, needs an AccessKey) or `none` (Ctrl+Alt+L only, and the mic stays closed while asleep) |
 | Mic capture | `@picovoice/pvrecorder-node` | 16 kHz mono frames |
 | End-of-speech | Silero VAD (ONNX) or Picovoice Cobra | Start with a simple silence timer, upgrade in phase 5 |
 | Speech-to-text | Interface `SttProvider` with `transcribe()` and optional `stream()` | Default: whisper.cpp running locally (batch only, no partials). Streaming option for phase 5: Deepgram, or a local streaming model. `transcript_partial` events are sent only when the provider streams |
@@ -538,12 +538,18 @@ Needed by phase 4 / 6:
 
 ## 18. Status
 
-**Phase 0: done (awaiting user sign-off).** **Phase 1: built and unit-tested.** Claude replies work live through the Claude CLI on the user's subscription (`npm run repl`): about 1.8 s to the first answer from cold, and Sonnet when forced about 3.7 s. The wake word still needs the Picovoice AccessKey: `npm run set-key -- picovoice`.
+**Phase 0: done (awaiting user sign-off).** **Phase 1: built and unit-tested.** Claude replies work live through the Claude CLI on the user's subscription (`npm run repl`): about 1.8 s to the first answer from cold, and Sonnet when forced about 3.7 s. The wake word uses Windows' own recognizer, so no key or account is needed. `npm start` runs end to end; it has not been tried by voice yet.
 
 Phase 1 (`npm start`, `npm run repl`):
 - `VoiceLoop` (core/src/voice/loop.ts): one mic stream feeds everything. Porcupine hears every frame, even while Jarvis is thinking or speaking, so "Jarvis" or the stop keyword always interrupts. States follow section 6 through `StateMachine` (state/machine.ts). Speech-to-text never runs on Jarvis's own voice.
 - `Endpointer` (audio/endpointer.ts): an energy check against the room's noise floor, measured while asleep (`NoiseFloor`). 800 ms of quiet ends the request; no speech within 5 s of the wake word sends Jarvis back to sleep; recordings stop at 15 s. Proper VAD is phase 5.
-- Wake word: the built-in "jarvis" (`keywords.wake`). There's no stop .ppn yet, so saying "Jarvis" while it speaks interrupts it and listens, and "Jarvis, stop" then stops it as a spoken command.
+- Wake word with Windows' recognizer (audio/keywords.ts, audio/winspeech-keywords.ps1).
+  - **Test with the Windows voice:** it heard "Jarvis", "Hey Jarvis", "Jarvis stop", "Jarvis, what's two plus two" and "Hey Jarvis open Slack". It ignored "I told Jarvis about it", "Travis is coming over", "call the service later" and two other sentences.
+  - **Speed:** it reports about 1 s after the phrase ends.
+  - **Footprint:** about 140 MB RAM, about 0.3% of one CPU core while idle.
+  - **Stopping:** "Jarvis stop" stops. Saying "Jarvis" while it speaks interrupts and listens again.
+  - **Talk key:** Ctrl+Alt+L works in every mode (Ctrl+Alt+Space was taken on this PC). With `provider: none`, the mic is closed while Jarvis sleeps.
+- Before any noise measurement exists, the endpointer assumes a quiet room (−70 dBFS), so speaking right after the talk key is still heard.
 - Spoken commands must be the whole utterance (voice/commands.ts): stop, sleep, mute, and "what are you doing". The conversation handles "Jarvis, use Opus".
 - `Conversation` (voice/conversation.ts) handles, in order:
   - learner statements first, then model commands;
@@ -562,7 +568,7 @@ Phase 1 (`npm start`, `npm run repl`):
 - Not done in phase 1:
   - core's WebSocket bridge to the pet (phase 4; the console shows events for now);
   - measuring against the 3-second end-to-end target;
-  - the live wake word (no Picovoice key on this PC yet).
+  - trying the wake word with the user's own voice and room (tested only with the Windows voice so far).
 
 **Built ahead of plan (no audio or model calls needed), all tested:**
 - Memory on the Claude Memory Store (13), with local in-memory fallback. Not yet run against the live store: no Anthropic API key on this PC yet.
@@ -578,7 +584,7 @@ Phase 1 (`npm start`, `npm run repl`):
 - `packages/pet/preview/pet-preview.html`: the browser preview used to agree the look.
 - Speech-to-text (phase 1 piece): whisper.cpp b5454 installed by `npm run setup-whisper` from the official GitHub release and Hugging Face, both SHA-256 checked, into `%APPDATA%\jarvis` (12 MB program after pruning, 78 MB model `ggml-base.en-q8_0.bin`). `WhisperCppStt` runs `whisper-server` on 127.0.0.1 with the model loaded (about 0.4 s to start, about 140 MB RAM) and unloads it after 60 s idle. Audio is sent in memory, never written to disk. `npm run stt-test`: Windows voice into Whisper, 96% of words right (misses were "PROJ142" and "10" for "ten"), about 1 s per request on this CPU. Not yet tried with the user's own voice: `npm run stt-test -- --mic 5`.
 - Footprint measured 2026-11-14: whisper 12 MB + model 78 MB on disk; pet about 116 MB private RAM (Electron, GPU process off); Electron's 144 MB download cache deleted.
-- 159 tests pass (including the Claude CLI lockdown, lookups, stop and restart, against a fake CLI). Phase 1 added tests for the state machine, endpointer, spoken commands, sentence splitting, the conversation (escalation, retrieval tools, stop mid-reply), and the voice loop with a fake mic, keywords, speech and playback.
+- 164 tests pass (including the Claude CLI lockdown against a fake CLI, the live Windows wake word, one-breath replay, and hotkey-only mode). Phase 1 added tests for the state machine, endpointer, spoken commands, sentence splitting, the conversation (escalation, retrieval tools, stop mid-reply), and the voice loop with a fake mic, keywords, speech and playback.
 
 Kept lightweight: Node 22.18+ runs the TypeScript directly (type stripping, no build step, no tsx), tests use the built-in `node:test`, and Biome is the only lint/format tool. Dev deps: `typescript`, `@types/node`, `@biomejs/biome`. Runtime deps: `zod`, `yaml`, `@anthropic-ai/sdk`, `@picovoice/pvrecorder-node`, `@picovoice/pvspeaker-node`, `@picovoice/porcupine-node` (4.0.2, 7 MB, prebuilt).
 

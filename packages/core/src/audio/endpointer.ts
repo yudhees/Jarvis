@@ -24,6 +24,8 @@ export type EndpointResult =
 const ABOVE_FLOOR_DB = 15;
 /** ...and at least this loud. */
 const MIN_SPEECH_DBFS = -60;
+/** Assumed room level before anything was measured. */
+const DEFAULT_FLOOR_DBFS = -70;
 /** Frames of loud audio (out of the last few) that count as speech starting. */
 const START_FRAMES = 3;
 const START_WINDOW = 5;
@@ -39,7 +41,7 @@ export class Endpointer {
   readonly #o: EndpointerOptions;
   readonly #frameMs: number;
   readonly #frames: Int16Array[] = [];
-  #floor: number | undefined;
+  #floor: number;
   #recent: boolean[] = [];
   #startedAt = -1;
   #quietMs = 0;
@@ -48,7 +50,9 @@ export class Endpointer {
   constructor(options: EndpointerOptions) {
     this.#o = options;
     this.#frameMs = (options.frameLength / options.sampleRate) * 1000;
-    this.#floor = options.floorDbfs;
+    // No measurement yet (mic was closed while asleep): assume a quiet room
+    // and adjust on quiet frames, so speech right away is still heard.
+    this.#floor = options.floorDbfs ?? DEFAULT_FLOOR_DBFS;
   }
 
   get started(): boolean {
@@ -63,10 +67,10 @@ export class Endpointer {
     if (this.#done) throw new Error('endpointer already finished');
     this.#frames.push(frame);
     const dbfs = toDbfs(rmsLevel(frame));
-    const loud = dbfs > Math.max((this.#floor ?? dbfs) + ABOVE_FLOOR_DB, MIN_SPEECH_DBFS);
-    if (!loud || this.#floor === undefined) {
+    const loud = dbfs > Math.max(this.#floor + ABOVE_FLOOR_DB, MIN_SPEECH_DBFS);
+    if (!loud) {
       // Track the room's noise floor on quiet frames only.
-      this.#floor = this.#floor === undefined ? dbfs : this.#floor * 0.9 + dbfs * 0.1;
+      this.#floor = this.#floor * 0.9 + dbfs * 0.1;
     }
 
     if (!this.started) {

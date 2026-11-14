@@ -1,14 +1,20 @@
 /**
  * Jarvis core: the voice loop (phase 1).
  *
- *   npm start               say "Jarvis", then your request
+ *   npm start               say "Jarvis" (or press Ctrl+Alt+L), then your request
  *   npm start -- --local    memory kept only while running (nothing saved)
  *
- * Ctrl+Alt+J stops, Ctrl+Alt+M mutes or unmutes, Ctrl+C quits.
+ * Ctrl+Alt+L talks, Ctrl+Alt+J stops, Ctrl+Alt+M mutes or unmutes, Ctrl+C quits.
  */
 import { parseArgs } from 'node:util';
 import type { CoreToPetEvent } from '@jarvis/shared';
-import { Microphone, PorcupineSpotter, PvSpeakerPlayer } from './audio/index.ts';
+import {
+  type KeywordSpotter,
+  Microphone,
+  PorcupineSpotter,
+  PvSpeakerPlayer,
+  WindowsKeywordSpotter,
+} from './audio/index.ts';
 import { loadConfig } from './config/index.ts';
 import { WindowsHotkeys } from './hotkey/index.ts';
 import { readSecret } from './secrets/index.ts';
@@ -21,10 +27,33 @@ const { values: args } = parseArgs({ options: { local: { type: 'boolean' } }, st
 const config = loadConfig();
 const { jarvis } = config;
 
-const picovoiceKey = await readSecret('picovoice');
-if (!picovoiceKey) {
-  console.error('No Picovoice AccessKey saved. Run: npm run set-key -- picovoice');
-  process.exit(1);
+/** How Jarvis hears its name: Windows' own recognizer, Picovoice, or the hotkey only. */
+async function openKeywords(): Promise<{ spotter: KeywordSpotter | null; how: string }> {
+  const k = jarvis.keywords;
+  if (k.provider === 'picovoice') {
+    const accessKey = await readSecret('picovoice');
+    if (accessKey) {
+      const spotter = new PorcupineSpotter({ accessKey, ...k });
+      if (spotter.frameLength !== jarvis.audio.frameLength) {
+        throw new Error(`Porcupine needs audio.frameLength ${spotter.frameLength}`);
+      }
+      return { spotter, how: 'Say "Jarvis" (Picovoice)' };
+    }
+    console.log('No Picovoice AccessKey saved; using the Windows recognizer instead.');
+  }
+  if (k.provider !== 'none') {
+    const spotter = new WindowsKeywordSpotter({
+      sampleRate: jarvis.audio.sampleRate,
+      minConfidence: k.minConfidence,
+    });
+    try {
+      await spotter.start();
+      return { spotter, how: 'Say "Jarvis" (Windows speech recognizer)' };
+    } catch (err) {
+      console.log(`Windows speech recognizer unavailable: ${(err as Error).message}`);
+    }
+  }
+  return { spotter: null, how: 'Press Ctrl+Alt+L' };
 }
 
 let opened: Awaited<ReturnType<typeof openConversation>>;
@@ -53,11 +82,8 @@ const tts = new WindowsSapiTts({
   timeoutMs: jarvis.voice.requestTimeoutSeconds * 1000,
 });
 const player = new PvSpeakerPlayer(jarvis.audio.outputDevice);
-const keywords = new PorcupineSpotter({ accessKey: picovoiceKey, ...jarvis.keywords });
-const mic = new Microphone(keywords.frameLength, jarvis.audio.inputDevice);
-if (keywords.frameLength !== jarvis.audio.frameLength) {
-  console.log(`Note: Porcupine uses ${keywords.frameLength}-sample frames.`);
-}
+const { spotter: keywords, how: wakeHow } = await openKeywords();
+const mic = new Microphone(jarvis.audio.frameLength, jarvis.audio.inputDevice);
 
 const STATE_LABEL: Record<string, string> = {
   SLEEPING: 'asleep',
@@ -116,7 +142,7 @@ const loop = new VoiceLoop({
   conversation,
   timing: {
     sampleRate: jarvis.audio.sampleRate,
-    frameLength: keywords.frameLength,
+    frameLength: jarvis.audio.frameLength,
     silenceMs: jarvis.listening.silenceMs,
     startTimeoutMs: jarvis.listening.startTimeoutSeconds * 1000,
     maxRecordMs: jarvis.listening.maxRecordSeconds * 1000,
@@ -137,6 +163,7 @@ const hotkeys = new WindowsHotkeys();
 try {
   const taken = await hotkeys.start((action) => {
     if (action === 'stop') loop.stop();
+    else if (action === 'talk') loop.talk();
     else loop.toggleMute();
   });
   for (const key of taken) console.log(`Hotkey for ${key} is used by another program.`);
@@ -154,14 +181,14 @@ process.on('SIGINT', () => {
 
 console.log(
   `Jarvis is ready. Brain: ${opened.brain}. Memory: ${opened.memory}. ${opened.skillCount} skills found.\n` +
-    `Say "${jarvis.keywords.wake === 'jarvis' ? 'Jarvis' : 'the wake word'}", then your request. ` +
+    `${wakeHow}, then your request (or Ctrl+Alt+L). ` +
     'Ctrl+Alt+J stops, Ctrl+Alt+M mutes, Ctrl+C quits.',
 );
 try {
   await loop.run(quit.signal);
 } finally {
   hotkeys.close();
-  keywords.release();
+  keywords?.release();
   await Promise.allSettled([stt.close(), tts.close(), opened.model.close?.()]);
   console.log('Bye.');
 }

@@ -2,12 +2,12 @@ import { type ChildProcess, spawn } from 'node:child_process';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 
-export type HotkeyAction = 'stop' | 'mute';
+export type HotkeyAction = 'stop' | 'mute' | 'talk';
 
 const SCRIPT = path.join(import.meta.dirname, 'hotkey-host.ps1');
 
 /**
- * Ctrl+Alt+J (stop) and Ctrl+Alt+M (mute toggle), registered by core so they
+ * Ctrl+Alt+J (stop), Ctrl+Alt+M (mute toggle) and Ctrl+Alt+L (talk), registered by core so they
  * work with the pet closed (CLAUDE.md 10.6). Runs a small PowerShell process
  * with a Windows message loop; no native Node module needed.
  */
@@ -36,7 +36,7 @@ export class WindowsHotkeys {
           resolve(taken);
         } else if (line.startsWith('error ')) {
           taken.push(line.slice(6) as HotkeyAction);
-        } else if (line === 'stop' || line === 'mute') {
+        } else if (line === 'stop' || line === 'mute' || line === 'talk') {
           onPress(line);
         }
       });

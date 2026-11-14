@@ -15,10 +15,12 @@ listening:
   silenceMs: 800 # this much quiet ends what you are saying
   startTimeoutSeconds: 5 # after "Jarvis", give up if you say nothing
 
-keywords: # Porcupine (needs a Picovoice AccessKey: npm run set-key -- picovoice)
-  wake: jarvis # built-in keyword; later a custom "Hi Jarvis" .ppn path
-  stop: null # path to a "Jarvis stop" .ppn; null = saying "Jarvis" interrupts
-  sensitivity: 0.5 # 0..1, higher wakes more easily (and falsely)
+keywords: # how Jarvis hears "Jarvis" (Ctrl+Alt+L always works too)
+  provider: windows # windows = built-in recognizer, no account | picovoice | none = hotkey only
+  minConfidence: 0.6 # windows: 0..1, higher = fewer false wakes, more misses
+  wake: jarvis # picovoice only: built-in keyword or a custom .ppn path
+  stop: null # picovoice only: "Jarvis stop" .ppn path; null = saying "Jarvis" interrupts
+  sensitivity: 0.5 # picovoice only: 0..1
 
 approval:
   timeoutSeconds: 20

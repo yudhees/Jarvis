@@ -3,15 +3,15 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
-import type { AudioPlayer, Keyword, KeywordSpotter } from '@jarvis/core/audio';
-import { Endpointer } from '@jarvis/core/audio';
+import type { AudioPlayer, KeywordHit, KeywordSpotter } from '@jarvis/core/audio';
+import { Endpointer, parseKeywordLine, WindowsKeywordSpotter } from '@jarvis/core/audio';
 import { loadConfig } from '@jarvis/core/config';
 import { Learner } from '@jarvis/core/learning';
 import { InMemoryFiles } from '@jarvis/core/memory';
 import type { Skill } from '@jarvis/core/skills';
 import { StateError, StateMachine } from '@jarvis/core/state';
 import type { SttProvider } from '@jarvis/core/stt';
-import type { TtsProvider } from '@jarvis/core/tts';
+import { type TtsProvider, WindowsSapiTts } from '@jarvis/core/tts';
 import {
   Conversation,
   type ModelRequest,
@@ -348,9 +348,11 @@ class FrameFeed {
 
 /** Fires a keyword on marked frames. */
 class FakeKeywords implements KeywordSpotter {
-  readonly frameLength = FRAME;
-  readonly marks = new Map<Int16Array, Keyword>();
-  process(f: Int16Array): Keyword | null {
+  readonly marks = new Map<Int16Array, KeywordHit>();
+  /** Samples seen, like the real spotter counts them. */
+  samples = 0;
+  process(f: Int16Array): KeywordHit | null {
+    this.samples += f.length;
     return this.marks.get(f) ?? null;
   }
   release(): void {}
@@ -359,16 +361,20 @@ class FakeKeywords implements KeywordSpotter {
 const WAKE = frame(-79);
 const STOP = frame(-78);
 
-function fakeLoop(replyText: string, playMs = 30) {
+function fakeLoop(replyText: string, playMs = 30, opts: { wakeWord?: boolean } = {}) {
   const feed = new FrameFeed();
   const keywords = new FakeKeywords();
-  keywords.marks.set(WAKE, 'wake');
-  keywords.marks.set(STOP, 'stop');
+  keywords.marks.set(WAKE, { keyword: 'wake' });
+  keywords.marks.set(STOP, { keyword: 'stop' });
   const events: CoreToPetEvent[] = [];
   const states: JarvisState[] = [];
   const played: string[] = [];
+  const heardSeconds: number[] = [];
   const stt: SttProvider = {
-    transcribe: async () => ({ text: "Jarvis, what's two plus two?", ms: 5 }),
+    transcribe: async (pcm) => {
+      heardSeconds.push(pcm.length / RATE);
+      return { text: "Jarvis, what's two plus two?", ms: 5 };
+    },
     close: async () => {},
   };
   const tts: TtsProvider = {
@@ -390,7 +396,7 @@ function fakeLoop(replyText: string, playMs = 30) {
   const asked: string[] = [];
   const loop = new VoiceLoop({
     frames: (s) => feed.frames(s),
-    keywords,
+    keywords: opts.wakeWord === false ? null : keywords,
     stt,
     tts,
     player,
@@ -426,7 +432,17 @@ function fakeLoop(replyText: string, playMs = 30) {
       if (e.type === 'state') states.push(e.state);
     },
   });
-  return { feed, loop, events, states, played, asked, resets: () => resets };
+  return {
+    feed,
+    loop,
+    keywords,
+    events,
+    states,
+    played,
+    asked,
+    heardSeconds,
+    resets: () => resets,
+  };
 }
 
 const tick = (ms = 5) => new Promise((r) => setTimeout(r, ms));
@@ -529,5 +545,110 @@ describe('VoiceLoop', () => {
     assert.deepEqual(t.asked, []);
     quit.abort();
     await running;
+  });
+});
+
+describe('VoiceLoop without a wake-word account', () => {
+  it('"Jarvis, what\'s two plus two" in one breath: the request audio is replayed, not lost', async () => {
+    const t = fakeLoop('Four.');
+    const quit = new AbortController();
+    const running = t.loop.run(quit.signal);
+    t.feed.push(QUIET, 20);
+    // The whole sentence is spoken before the recognizer reports the wake word.
+    const phraseStart = 20 * FRAME;
+    t.feed.push(SPEECH, 40);
+    t.feed.push(QUIET, 3);
+    const late = frame(-77);
+    t.keywords.marks.set(late, { keyword: 'wake', startSample: phraseStart });
+    t.feed.push(late);
+    t.feed.push(QUIET, 12);
+    await until(() => t.asked.length === 1);
+    const heard = t.heardSeconds[0] ?? 0;
+    assert.ok(heard > 1.2, `the whole request was transcribed (${heard.toFixed(2)} s)`);
+    quit.abort();
+    await running;
+  });
+
+  it('hotkey only: the mic stays closed while asleep and opens on the talk key', async () => {
+    const t = fakeLoop('Okay.', 30, { wakeWord: false });
+    const quit = new AbortController();
+    const running = t.loop.run(quit.signal);
+    await tick(30);
+    assert.equal(t.feed.opened, 0, 'no mic while asleep');
+    t.loop.talk();
+    await until(() => t.feed.opened === 1);
+    assert.equal(t.loop.state, 'LISTENING');
+    say(t.feed);
+    await until(() => t.states.includes('FOLLOW_UP'));
+    t.feed.push(QUIET, 20);
+    await until(() => t.loop.state === 'SLEEPING');
+    await until(() => t.feed.released === 1);
+    assert.equal(t.asked.length, 1);
+    quit.abort();
+    await running;
+  });
+
+  it('the talk key interrupts Jarvis while it speaks', async () => {
+    const t = fakeLoop('A very long answer.', 2000);
+    const quit = new AbortController();
+    const running = t.loop.run(quit.signal);
+    t.feed.push(QUIET, 20);
+    t.feed.push(WAKE);
+    say(t.feed);
+    await until(() => t.loop.state === 'SPEAKING');
+    t.loop.talk();
+    assert.equal(t.loop.state, 'LISTENING');
+    quit.abort();
+    await running;
+  });
+});
+
+describe('parseKeywordLine (Windows recognizer)', () => {
+  it('the wake word alone waits for the request; in one breath it replays', () => {
+    assert.deepEqual(parseKeywordLine('wake 0.97 0.000 jarvis', RATE), { keyword: 'wake' });
+    assert.deepEqual(parseKeywordLine('wake 0.93 16.510 hey jarvis', RATE), { keyword: 'wake' });
+    assert.deepEqual(parseKeywordLine('wake 0.74 2.450 Jarvis watts two plus two', RATE), {
+      keyword: 'wake',
+      startSample: 39200,
+    });
+    assert.deepEqual(parseKeywordLine('stop 0.95 25.680 jarvis stop', RATE), { keyword: 'stop' });
+    assert.equal(parseKeywordLine('ignored other 0.80 I told Jarvis', RATE), null);
+    assert.equal(parseKeywordLine('ready', RATE), null);
+  });
+});
+
+describe('WindowsKeywordSpotter (live)', { skip: process.platform !== 'win32' }, () => {
+  it('hears "Jarvis" and ignores ordinary speech that mentions it', async () => {
+    const spotter = new WindowsKeywordSpotter({ sampleRate: RATE, minConfidence: 0.6 });
+    const tts = new WindowsSapiTts({ voice: null, rate: 0, timeoutMs: 20000 });
+    try {
+      await spotter.start();
+      const hits: KeywordHit[] = [];
+      const feedPhrase = async (text: string) => {
+        const a = await tts.synthesize(text);
+        const all = new Int16Array(a.pcm.length + RATE);
+        all.set(a.pcm);
+        for (let i = 0; i < all.length; i += FRAME) {
+          const hit = spotter.process(all.slice(i, i + FRAME));
+          if (hit) hits.push(hit);
+          await tick(4); // faster than real time is fine
+        }
+      };
+      await feedPhrase('I told Jarvis about it yesterday.');
+      await feedPhrase('Jarvis');
+      for (let i = 0; i < 100 && hits.length === 0; i++) {
+        const hit = spotter.process(new Int16Array(FRAME));
+        if (hit) hits.push(hit);
+        await tick(20);
+      }
+      assert.deepEqual(
+        hits.map((h) => h.keyword),
+        ['wake'],
+        'one wake, and the sentence that only mentions Jarvis ignored',
+      );
+    } finally {
+      spotter.release();
+      await tts.close();
+    }
   });
 });

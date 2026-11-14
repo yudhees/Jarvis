@@ -40,7 +40,11 @@ export interface TurnLog {
 export interface VoiceLoopDeps {
   /** Mic frames; iteration stops (and the device is released) when the signal aborts. */
   frames: (signal: AbortSignal) => AsyncIterable<Int16Array>;
-  keywords: KeywordSpotter;
+  /**
+   * Wake/stop keyword spotter. Null = no wake word: the user presses the talk
+   * hotkey (`talk()`), and the mic is closed completely while Jarvis sleeps.
+   */
+  keywords: KeywordSpotter | null;
   stt: SttProvider;
   tts: TtsProvider;
   player: AudioPlayer;
@@ -64,6 +68,11 @@ export interface VoiceLoopDeps {
  * while Jarvis is thinking or speaking, so "Jarvis" or "Jarvis stop" always
  * interrupts. Speech-to-text never runs on Jarvis's own voice (10.4).
  */
+/** About 10 s of 32 ms frames kept for replay (~320 KB). */
+const RECENT_FRAMES = 320;
+/** Audio kept from just before the phrase start, so the first syllable is not cut. */
+const REPLAY_MARGIN_SECONDS = 0.25;
+
 export class VoiceLoop {
   readonly #d: VoiceLoopDeps;
   readonly #sm: StateMachine;
@@ -71,12 +80,26 @@ export class VoiceLoop {
   #ep: Endpointer | undefined;
   #task: AbortController | undefined;
   #mic: AbortController | undefined;
-  #unmuted: PromiseWithResolvers<void> | undefined;
+  /** Wakes run() when the mic should open again (unmute, or talk without a wake word). */
+  #resume: PromiseWithResolvers<void> | undefined;
   #lastStatus = 'Nothing yet.';
+  /** Recent mic frames with their position, for replaying a one-breath request. */
+  readonly #recent: { frame: Int16Array; start: number }[] = [];
+  /** Samples given to the keyword spotter so far (positions are counted the same way). */
+  #samples = 0;
 
   constructor(deps: VoiceLoopDeps) {
     this.#d = deps;
-    this.#sm = new StateMachine((state) => deps.emit({ type: 'state', state }));
+    this.#sm = new StateMachine((state) => {
+      deps.emit({ type: 'state', state });
+      // Without a wake word nothing needs to hear the room while asleep: release the mic.
+      if (state === 'SLEEPING' && !deps.keywords) this.#mic?.abort();
+    });
+  }
+
+  /** True when a wake word is listened for; false = hotkey only. */
+  get hasWakeWord(): boolean {
+    return this.#d.keywords !== null;
   }
 
   get state(): JarvisState {
@@ -88,12 +111,13 @@ export class VoiceLoop {
     signal.addEventListener('abort', () => {
       this.#cancelTask();
       this.#mic?.abort();
-      this.#unmuted?.resolve();
+      this.#resume?.resolve();
     });
     while (!signal.aborted) {
-      if (this.#sm.state === 'MUTED') {
-        this.#unmuted = Promise.withResolvers();
-        await this.#unmuted.promise;
+      const state = this.#sm.state;
+      if (state === 'MUTED' || (state === 'SLEEPING' && !this.#d.keywords)) {
+        this.#resume = Promise.withResolvers();
+        await this.#resume.promise;
         continue;
       }
       this.#mic = new AbortController();
@@ -134,7 +158,24 @@ export class VoiceLoop {
   unmute(): void {
     if (this.#sm.state !== 'MUTED') return;
     this.#sm.to('SLEEPING');
-    this.#unmuted?.resolve();
+    this.#resume?.resolve();
+  }
+
+  /**
+   * Talk hotkey: same as saying the wake word. Starts listening, or interrupts
+   * Jarvis while it thinks or speaks. Does nothing while muted.
+   */
+  talk(): void {
+    const state = this.#sm.state;
+    if (state === 'MUTED' || state === 'LISTENING' || state === 'ERROR') return;
+    if (state === 'SLEEPING') {
+      this.#d.onWake?.();
+      this.#d.conversation.warm?.();
+    } else {
+      this.#cancelTask();
+    }
+    this.#listen(this.#d.timing.startTimeoutMs);
+    this.#resume?.resolve();
   }
 
   toggleMute(): void {
@@ -143,31 +184,58 @@ export class VoiceLoop {
   }
 
   #onFrame(frame: Int16Array): void {
-    const keyword = this.#d.keywords.process(frame);
+    const hit = this.#d.keywords?.process(frame) ?? null;
+    const start = this.#samples;
+    this.#samples += frame.length;
+    this.#recent.push({ frame, start });
+    if (this.#recent.length > RECENT_FRAMES) this.#recent.shift();
     const state = this.#sm.state;
 
     if (state === 'SLEEPING') {
       this.#floor.push(frame);
-      if (keyword === 'wake') {
+      if (hit?.keyword === 'wake') {
         this.#d.onWake?.();
         this.#d.conversation.warm?.();
         this.#listen(this.#d.timing.startTimeoutMs);
+        this.#replay(hit.startSample);
       }
       return;
     }
-    if (keyword === 'stop') {
+    if (hit?.keyword === 'stop') {
       this.stop();
       return;
     }
     if (
-      keyword === 'wake' &&
+      hit?.keyword === 'wake' &&
       (state === 'THINKING' || state === 'SPEAKING' || state === 'FOLLOW_UP')
     ) {
       // "Jarvis, ..." while busy: drop what it was doing and listen.
       this.#cancelTask();
       this.#listen(this.#d.timing.startTimeoutMs);
+      this.#replay(hit.startSample);
       return;
     }
+    this.#feed(frame);
+  }
+
+  /**
+   * "Jarvis, what's the time" in one breath: the request was already said when
+   * the wake word was recognized, so run the recent audio from the phrase start
+   * through the endpointer.
+   */
+  #replay(startSample: number | undefined): void {
+    if (startSample === undefined) return;
+    const from = startSample - this.#d.timing.sampleRate * REPLAY_MARGIN_SECONDS;
+    for (const { frame, start } of this.#recent) {
+      if (start + frame.length <= from) continue;
+      if (!this.#ep) return; // the replayed audio already ended the request
+      this.#feed(frame);
+    }
+  }
+
+  /** One frame of a request being recorded (LISTENING or FOLLOW_UP). */
+  #feed(frame: Int16Array): void {
+    const state = this.#sm.state;
     if ((state !== 'LISTENING' && state !== 'FOLLOW_UP') || !this.#ep) return;
 
     const r = this.#ep.push(frame);

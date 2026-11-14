@@ -60,10 +60,18 @@ export const jarvisSchema = z.strictObject({
     startTimeoutSeconds: seconds,
   }),
   keywords: z.strictObject({
-    /** Built-in Porcupine keyword name, or a path to a Windows .ppn file. */
+    /**
+     * windows = the speech recognizer built into Windows (no account);
+     * picovoice = Porcupine (needs an AccessKey); none = Ctrl+Alt+L only.
+     */
+    provider: z.enum(['windows', 'picovoice', 'none']),
+    /** Windows: lowest recognizer confidence that counts (0..1). */
+    minConfidence: z.number().min(0).max(1),
+    /** Picovoice: built-in keyword name, or a path to a Windows .ppn file. */
     wake: z.string().min(1),
-    /** Path to a "Jarvis stop" .ppn; null = the wake word also interrupts. */
+    /** Picovoice: path to a "Jarvis stop" .ppn; null = the wake word also interrupts. */
     stop: z.string().min(1).nullable(),
+    /** Picovoice: 0..1, higher wakes more easily (and falsely). */
     sensitivity: z.number().min(0).max(1),
   }),
   approval: z.strictObject({

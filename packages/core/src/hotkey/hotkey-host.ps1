@@ -1,5 +1,6 @@
-# Global hotkeys owned by core (CLAUDE.md 10.6): Ctrl+Alt+J stop, Ctrl+Alt+M mute.
-# Prints "ready", then one line per press ("stop" / "mute"), or "error <key>" if
+# Global hotkeys owned by core (CLAUDE.md 10.6): Ctrl+Alt+J stop, Ctrl+Alt+M mute,
+# Ctrl+Alt+L talk (start listening, or interrupt).
+# Prints "ready", then one line per press ("stop" / "mute" / "talk"), or "error <key>" if
 # another program already owns a key. Core ends this process on exit.
 $ErrorActionPreference = 'Stop'
 Add-Type -TypeDefinition @'
@@ -16,7 +17,7 @@ public static class JarvisHotkeys {
 '@
 
 $MOD_ALT = 0x1; $MOD_CONTROL = 0x2; $MOD_NOREPEAT = 0x4000
-$keys = @{ 1 = @('stop', 0x4A); 2 = @('mute', 0x4D) }  # J, M
+$keys = @{ 1 = @('stop', 0x4A); 2 = @('mute', 0x4D); 3 = @('talk', 0x4C) }  # J, M, L
 foreach ($id in $keys.Keys) {
   $ok = [JarvisHotkeys]::RegisterHotKey([IntPtr]::Zero, $id, $MOD_CONTROL -bor $MOD_ALT -bor $MOD_NOREPEAT, $keys[$id][1])
   if (-not $ok) { [Console]::Out.WriteLine("error $($keys[$id][0])") }
