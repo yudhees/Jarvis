@@ -563,4 +563,4 @@ Known issues / notes:
 - PvSpeaker's buffer size must be whole seconds (minimum 1); fractions fail at init.
 - `@picovoice/pvspeaker-node` has no types entry in package.json; mapped in `packages/core/src/types/pvspeaker.d.ts`.
 - Whether stopped audio cuts off audibly at once (vs. draining the 1 s device buffer) has not been confirmed by ear.
-- No git remote; local repo only.
+- Remote: `origin` is github.com/yudhees/Jarvis. The GitHub CLI (`gh`) is not installed yet, so issues are not created yet.
