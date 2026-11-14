@@ -32,6 +32,28 @@ export type CoreToPetEvent =
   | { type: 'budget'; usedFraction: number }
   | { type: 'error'; message: string };
 
+/** First message from the pet on the local WebSocket. Core closes the socket if the token is wrong. */
+export interface PetHello {
+  type: 'hello';
+  token: string;
+}
+
+export const CORE_TO_PET_TYPES = [
+  'state',
+  'mic_level',
+  'transcript_partial',
+  'transcript_final',
+  'reply_text',
+  'speak_level',
+  'tool_start',
+  'tool_end',
+  'approval_request',
+  'approval_result',
+  'model_selected',
+  'budget',
+  'error',
+] as const;
+
 /** Pet -> core. There is deliberately no `approve`: approval is voice only. */
 export type PetToCoreEvent =
   | { type: 'stop' }

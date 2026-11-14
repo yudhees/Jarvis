@@ -491,7 +491,9 @@ Needed by phase 4 / 6:
 - MCP discovery (13.2): finds 11 plugin servers; tiers set for Jira and MongoDB tools; Playwright browser configured but disabled.
 - Grounding system prompt (8).
 - `npm run learn-repl` (add `--local` without an API key) to try memory, learning, and routing by typing.
-- 113 tests pass.
+- Desktop pet, phase 4 app shell (`npm run pet`): Electron, transparent and always on top above the taskbar, click-through except the pet and bubble, draggable with remembered position, tray menu (mute, stop, demo, settings folder, start with Windows, quit), all states and the speech bubble. Main process runs TypeScript directly; the sandboxed preload and the window script are plain JS. Events from core are validated before display and shown with `textContent` only. Until core's WebSocket bridge exists it runs in demo mode (click the pet, or `JARVIS_PET_DEMO=1`). Checked on screen: window, badge, held tool icon, reply bubble, follow-up ring. Not yet seen on screen: the amber approval bubble (screen locked during capture). Still to do for phase 4: core's bridge server, hotkeys in core.
+- `packages/pet/preview/pet-preview.html`: the browser preview used to agree the look.
+- 116 tests pass.
 
 Kept lightweight: Node 22.18+ runs the TypeScript directly (type stripping, no build step, no tsx), tests use the built-in `node:test`, and Biome is the only lint/format tool. Dev deps: `typescript`, `@types/node`, `@biomejs/biome`. Runtime deps: `zod`, `yaml`, `@picovoice/pvrecorder-node`, `@picovoice/pvspeaker-node`.
 

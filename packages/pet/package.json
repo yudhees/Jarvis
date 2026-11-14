@@ -3,5 +3,15 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Desktop pet (Electron). Built in phase 4."
+  "description": "Desktop pet (Electron): a transparent always-on-top window that shows what Jarvis is doing.",
+  "main": "src/main/main.ts",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "@jarvis/shared": "0.0.0"
+  },
+  "devDependencies": {
+    "electron": "43.8.5"
+  }
 }
