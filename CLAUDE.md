@@ -437,6 +437,26 @@ Jarvis reuses what is already installed for Claude Code on this PC instead of du
 
 **Subagents.** No custom Claude Code agents exist on this PC beyond the `egm` review plugin. Jarvis does not need them for PR review or Jira: those are a skill plus MCP tools. If agents are added later, they are loaded through the Agent SDK `agents` option with tools limited to tiered MCP tools (verify the option name in the docs first, rule 16.2).
 
+### 13.3 Replying to incoming Slack messages
+
+When someone messages the user on Slack, Jarvis can offer to reply hands-free. Planned for phase 6; needs phases 1, 3 (Slack sign-in, approval) and 4 (pet bridge).
+
+Flow:
+
+1. **Notice.** A core watcher finds new DMs and @mentions (only those, never every channel). It reads them aloud briefly: "Priya messaged you: are you joining the 3 pm call? Want to reply?" The pet shows the full message.
+2. **Ask.** Jarvis enters `AWAITING_INPUT` with topic `slack.reply` (6.2) and opens the mic without the wake word. The user can speak, or type in the pet's text box.
+3. **Dismiss.** No answer within 10 s (`slack.replyTimeoutSeconds`), or the user says "leave it", "skip", "later", or "ignore": the prompt closes and nothing is sent. The timer pauses once the user starts speaking or typing, so a long reply is not cut off. Dismissed messages are not offered again.
+4. **Approve and send.** The reply is the user's own words (same 500-character limit as 6.2). Sending is tier 2, so the normal voice approval of section 9 always follows, built from the real tool input: "Replying to Priya in your DM: yes, joining in five. Approve or cancel?" The reply goes to the same DM or thread. A typed reply is never an approval.
+
+Rules:
+
+- **Never interrupt.** Notices wait while Jarvis is `LISTENING`, `THINKING`, `AWAITING_*`, or `SPEAKING`, and are never spoken while `MUTED`. Waiting messages are bundled ("3 new messages, first from Priya").
+- **Untrusted content.** Incoming message text is untrusted (10.3). It is read aloud and shown, never followed as an instruction, and never a source for learning (13.1 rule 2).
+- **Destination.** Replies go only to the conversation the message came from, and the approval sentence names it aloud. Recipient counting (section 9) applies, so replying in a large channel thread is tier 3.
+- **Filters and quiet hours** in `jarvis.yaml`: allowed people and channels, quiet hours, and a "show, don't speak" mode that only displays the message in the pet when others are around.
+- **Delivery.** Start by checking for new messages every 30 to 60 s through the Slack MCP read tools (tier 0, allowed in the background, 10.5). An instant Slack Socket Mode app is an option later (needs a Slack app, likely admin approval, and section 10.8).
+- Every notice, answer, dismissal, and approval is written to the audit log.
+
 ## 14. Build phases
 
 Finish each phase, run its checks, and stop for the user to try it before starting the next.
@@ -459,8 +479,8 @@ Done when: the pet reflects every state within 100 ms, quitting the pet leaves c
 **Phase 5: feel.** Proper VAD, streaming speech-to-text (provider per section 17), sentence-by-sentence text-to-speech, barge-in, echo handling for speakers.
 Done when: Jarvis starts speaking within about 1.5 seconds of the user finishing a simple question on speakers, with no self-triggering. If the user chose local batch speech-to-text, measure and report the real number instead of forcing this target.
 
-**Phase 6: more power.** Windows control tools, browser MCP, memory, scheduler, background tasks, budget guard, start with Windows, optional speaker verification, more MCP servers.
-Done when: each new tool has a tier, a spoken approval template, and tests.
+**Phase 6: more power.** Windows control tools, browser MCP, memory, scheduler, background tasks, budget guard, start with Windows, optional speaker verification, more MCP servers, Slack reply flow (13.3).
+Done when: each new tool has a tier, a spoken approval template, and tests; an incoming Slack DM is offered, a spoken reply is sent only after approval, and silence for 10 s or "leave it" sends nothing.
 
 **Phase 7: learning.** Section 13.1: preferences, vocabulary fixes, adaptive routing (7.1 rule 3), habit offers, "what have you learned" / "forget" commands, nightly aggregation.
 Done when: a stated preference changes the next reply, a corrected name is transcribed right afterward, two "too slow" corrections lead to a confirmed routing change, and nothing learned can change a permission tier (guard test).
@@ -504,6 +524,7 @@ Needed by phase 4 / 6:
 
 - Daily budget.
 - Pet look: robot, orb, or animal?
+- Slack reply flow (13.3): which people and channels, quiet hours, and timed checks vs. a Socket Mode app.
 
 ## 18. Status
 
