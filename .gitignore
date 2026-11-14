@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.env
+.env.*
+*.log
+# audit logs, transcripts, local data (normally under %APPDATA%/jarvis)
+audit/
+data/
+# model files (wake word, VAD, whisper)
+models/
+*.ppn
+*.pv
+*.onnx
+*.bin
+*.gguf

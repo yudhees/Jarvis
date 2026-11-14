@@ -1,0 +1,46 @@
+# Main settings (CLAUDE.md). Invalid values stop Jarvis from starting.
+
+# Where Jarvis keeps its database, audit log, and models. %VARS% are expanded.
+dataDir: "%APPDATA%/jarvis"
+
+audio:
+  sampleRate: 16000 # fixed: Picovoice engines use 16 kHz
+  frameLength: 512 # samples per mic frame (32 ms)
+  inputDevice: -1 # -1 = Windows default; list with: npm run mic-test -- --list
+  outputDevice: -1 # -1 = Windows default; list with: npm run speaker-test -- --list
+
+listening:
+  maxRecordSeconds: 15
+  followUpSeconds: 8
+
+approval:
+  timeoutSeconds: 20
+
+tasks:
+  maxTurns: 25
+  maxSeconds: 300
+  maxIdenticalToolCalls: 3
+
+latency: # first spoken word budgets (section 7.1)
+  instantSeconds: 2
+  normalSeconds: 6
+
+voice:
+  provider: windows-sapi
+  voice: null # null = Windows default, or e.g. "Microsoft Zira Desktop"
+  rate: 0 # -10 (slow) .. 10 (fast)
+  requestTimeoutSeconds: 30
+
+budget: # open decision (section 17); null = not set yet
+  dailyCostUsd: null
+  dailyTokens: null
+
+files:
+  allowedFolders: [] # open decision (section 17)
+
+retention:
+  transcriptDays: 30
+
+learning:
+  enabled: true
+  aboutUserTokenCap: 300

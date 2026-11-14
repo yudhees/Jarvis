@@ -1,0 +1,8 @@
+# MCP servers to connect (CLAUDE.md section 4). Decided before phase 3.
+# Example:
+#   slack:
+#     type: stdio
+#     command: npx
+#     args: ["-y", "some-slack-mcp@1.2.3"]
+#     enabled: false
+servers: {}

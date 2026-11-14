@@ -1,0 +1,7 @@
+# Model per routing tier (CLAUDE.md section 7). Model IDs live only here.
+# Verify against the current Anthropic docs before changing.
+tiers:
+  simple: claude-haiku-5-5
+  standard: claude-sonnet-5-5
+  complex: claude-opus-5-5
+classifier: claude-haiku-5-5

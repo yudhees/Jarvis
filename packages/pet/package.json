@@ -1,0 +1,7 @@
+{
+  "name": "@jarvis/pet",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Desktop pet (Electron). Built in phase 4."
+}

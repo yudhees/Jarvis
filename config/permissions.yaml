@@ -1,0 +1,5 @@
+# Risk tier per tool (CLAUDE.md section 9).
+#   0 read-only, 1 low-risk/reversible, 2 spoken approval,
+#   3 spoken approval + confirmation code, 4 forbidden.
+# Any tool NOT listed here is treated as tier 2. That default is fixed in code.
+tools: {}
