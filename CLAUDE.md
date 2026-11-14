@@ -459,6 +459,7 @@ Done when: a stated preference changes the next reply, a corrected name is trans
 8. Everything must run on Windows 10 and 11. Use `path.join`, no bash-only scripts, PowerShell where a shell is needed.
 9. Small commits with clear messages. Run lint and tests before saying a phase is done.
 10. After each phase, update the "Status" section below with what works, what is stubbed, and known issues.
+11. Track work as GitHub issues on `origin` (`gh issue create`): one issue per phase, plus one per bug or known issue found. Each commit that finishes an issue ends its message with `Fixes #N`, so the issue closes automatically when the commit reaches `master` on GitHub. Push after each finished issue. Open a new issue for anything left undone instead of keeping it only in the Status section.
 
 ## 17. Decisions still open (ask the user)
 
