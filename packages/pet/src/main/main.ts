@@ -45,7 +45,27 @@ let manuallyHidden = false;
 let hideTimer: NodeJS.Timeout | undefined;
 let petVisible = false;
 
-if (!app.requestSingleInstanceLock()) app.quit();
+/** Where core's bridge is, from the environment core started us with. */
+function coreFromEnv(): { port: number; token: string } | undefined {
+  return parseCoreAddress({
+    port: Number(process.env.JARVIS_CORE_PORT),
+    token: process.env.JARVIS_PET_TOKEN,
+  });
+}
+
+function parseCoreAddress(data: unknown): { port: number; token: string } | undefined {
+  if (typeof data !== 'object' || data === null) return undefined;
+  const { port, token } = data as { port?: unknown; token?: unknown };
+  if (typeof port !== 'number' || !Number.isInteger(port) || port <= 0 || port > 65535) {
+    return undefined;
+  }
+  if (typeof token !== 'string' || token.length < 16 || token.length > 128) return undefined;
+  return { port, token };
+}
+
+// One pet at a time. A second copy started by a new core hands over the core
+// address, and this pet reconnects to it (see 'second-instance' below).
+if (!app.requestSingleInstanceLock(coreFromEnv() ?? {})) app.quit();
 
 // Keep the pet light: it draws a few SVG shapes, so it needs no GPU process,
 // a small JavaScript heap, and none of Chromium's background extras.
@@ -423,26 +443,30 @@ app.whenReady().then(() => {
   screen.on('display-metrics-changed', keepOnScreen);
   screen.on('display-removed', keepOnScreen);
 
-  const port = Number(process.env.JARVIS_CORE_PORT);
-  const token = process.env.JARVIS_PET_TOKEN;
-  if (Number.isInteger(port) && port > 0 && token) {
-    link = new CoreLink({
-      port,
-      token,
-      onEvent: show,
-      onStatus: (up) => {
-        connected = up;
-        if (up) stopDemo?.();
-        updateTray();
-      },
-    });
-    link.start();
-  }
+  const core = coreFromEnv();
+  if (core) connectCore(core);
 });
 
-app.on('second-instance', () => {
+function connectCore(core: { port: number; token: string }): void {
+  link?.stop();
+  link = new CoreLink({
+    ...core,
+    onEvent: show,
+    onStatus: (up) => {
+      connected = up;
+      if (up) stopDemo?.();
+      updateTray();
+    },
+  });
+  link.start();
+}
+
+app.on('second-instance', (_event, _argv, _cwd, data) => {
   manuallyHidden = false;
   showPet();
+  // A newer core started another pet: follow that core instead.
+  const core = parseCoreAddress(data);
+  if (core) connectCore(core);
 });
 app.on('before-quit', () => {
   savePosition();

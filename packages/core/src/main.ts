@@ -15,6 +15,7 @@ import {
   PvSpeakerPlayer,
   WindowsKeywordSpotter,
 } from './audio/index.ts';
+import { PetBridge, PetProcess } from './bridge/index.ts';
 import { loadConfig } from './config/index.ts';
 import { WindowsHotkeys } from './hotkey/index.ts';
 import { readSecret } from './secrets/index.ts';
@@ -134,6 +135,35 @@ function logTurn(t: TurnLog): void {
   console.log(`  (${parts.join(', ')})`);
 }
 
+const quit = new AbortController();
+
+// The pet (CLAUDE.md 11, 12): core sends every event to it; it can only ask
+// core to stop, mute, unmute or quit. Never to approve anything.
+const greeting = `Ready. ${wakeHow.replace(/ \(.*\)$/, '')}, or press Ctrl+Alt+L.`;
+const bridge = new PetBridge({
+  onEvent: (event) => {
+    if (event.type === 'stop') loop.stop();
+    else if (event.type === 'mute') loop.mute();
+    else if (event.type === 'unmute') loop.unmute();
+    else if (event.type === 'quit') quit.abort();
+  },
+  onConnect: () => {
+    console.log('  [pet connected]');
+    bridge.send({ type: 'state', state: loop.state });
+    bridge.send({ type: 'reply_text', text: greeting });
+  },
+});
+let pet: PetProcess | undefined;
+if (jarvis.pet.enabled) {
+  try {
+    const port = await bridge.listen();
+    pet = new PetProcess(port, bridge.token, (line) => console.log(`  [pet: ${line}]`));
+    pet.start();
+  } catch (err) {
+    console.log(`Pet unavailable: ${(err as Error).message}`);
+  }
+}
+
 const loop = new VoiceLoop({
   frames: (signal) => mic.frames(signal),
   keywords,
@@ -149,8 +179,12 @@ const loop = new VoiceLoop({
     maxRecordMs: jarvis.listening.maxRecordSeconds * 1000,
     followUpMs: jarvis.listening.followUpSeconds * 1000,
     fillerMs: jarvis.latency.normalSeconds * 1000,
+    bargeIn: jarvis.listening.bargeIn,
   },
-  emit: show,
+  emit: (event) => {
+    show(event);
+    bridge.send(event);
+  },
   fixTranscript: (text) => learner.fixTranscript(text),
   hints: () => ['Jarvis', ...learner.vocabularyHints()],
   onWake: () => {
@@ -172,7 +206,6 @@ try {
   console.log(`Hotkeys unavailable: ${(err as Error).message}`);
 }
 
-const quit = new AbortController();
 let closing = false;
 process.on('SIGINT', () => {
   if (closing) process.exit(1);
@@ -185,10 +218,24 @@ console.log(
     `${wakeHow}, then your request (or Ctrl+Alt+L). ` +
     'Ctrl+Alt+J stops, Ctrl+Alt+M mutes, Ctrl+C quits.',
 );
+// Say hello once, so it is clear Jarvis is up (the pet shows it in its bubble).
+// Not part of the state machine: it is short, and the loop is still asleep.
+void tts
+  .synthesize(greeting)
+  .then((audio) =>
+    player.play(audio.pcm, audio.sampleRate, {
+      signal: quit.signal,
+      onLevel: (level) => bridge.send({ type: 'speak_level', level }),
+    }),
+  )
+  .catch(() => {});
+
 try {
   await loop.run(quit.signal);
 } finally {
   hotkeys.close();
+  pet?.stop();
+  await bridge.close();
   keywords?.release();
   await Promise.allSettled([stt.close(), tts.close(), opened.model.close?.()]);
   console.log('Bye.');

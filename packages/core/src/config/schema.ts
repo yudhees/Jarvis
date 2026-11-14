@@ -56,6 +56,8 @@ export const jarvisSchema = z.strictObject({
     followUpSeconds: seconds,
     /** Quiet time that ends what the user is saying. */
     silenceMs: z.int().min(200).max(5000),
+    /** Talking while Jarvis thinks or speaks makes it stop and listen. */
+    bargeIn: z.boolean(),
     /** After the wake word, give up if no speech starts within this time. */
     startTimeoutSeconds: seconds,
   }),
@@ -103,6 +105,10 @@ export const jarvisSchema = z.strictObject({
   }),
   retention: z.strictObject({
     transcriptDays: positiveInt,
+  }),
+  pet: z.strictObject({
+    /** Open the desktop pet with `npm start`. */
+    enabled: z.boolean(),
   }),
   brain: z.strictObject({
     /** claude-cli = the user's Claude subscription through Claude Code; api = an API key. */

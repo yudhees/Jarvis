@@ -1,3 +1,4 @@
+export { BargeIn, type BargeInOptions } from './barge-in.ts';
 export {
   Endpointer,
   type EndpointerOptions,

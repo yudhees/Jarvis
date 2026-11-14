@@ -565,9 +565,20 @@ Phase 1 (`npm start`, `npm run repl`):
 - Hotkeys are registered by core (hotkey/hotkey-host.ps1, a RegisterHotKey message loop): Ctrl+Alt+J stops, Ctrl+Alt+M toggles mute. Registering takes about 0.7 s.
 - Whisper starts loading when the wake word is heard, while the user is still talking.
 - If the Claude Memory Store can't be opened, memory falls back to a temporary store.
+- Pet link (phase 4 piece, bridge/): `npm start` starts the pet (`pet.enabled`) and sends it every event.
+  - **Server:** a small WebSocket server written for Jarvis (no package). It listens on 127.0.0.1 only, on a random port, with a random token that must be the pet's first message.
+  - **Refused:** requests with an Origin header (web pages), other paths, oversized frames and unknown or `approve` messages.
+  - **Pet crashes:** the pet is restarted once if it exits.
+  - **Older pet still running:** it reconnects to the new core instead of the new pet closing.
+  - **Startup:** Jarvis says a short "Ready" greeting at startup.
+- Interruptions (`listening.bargeIn`, audio/barge-in.ts):
+  - **Talking again while Jarvis is still thinking:** the half answer is dropped, and the earlier words (without the pause) are joined with the new ones.
+  - **Talking over Jarvis while it speaks:** it stops at once and listens.
+  - **Echo:** Jarvis's own voice from the speakers is told apart by comparing the mic level with the level being played. The expected echo is learned, and the user must be 10 dB above it for about 0.3 s.
+  - **Pause length:** `silenceMs` is now 1000.
 - Not done in phase 1:
-  - core's WebSocket bridge to the pet (phase 4; the console shows events for now);
   - measuring against the 3-second end-to-end target;
+  - trying the interruptions by voice on speakers;
   - trying the wake word with the user's own voice and room (tested only with the Windows voice so far).
 
 **Built ahead of plan (no audio or model calls needed), all tested:**
@@ -584,7 +595,7 @@ Phase 1 (`npm start`, `npm run repl`):
 - `packages/pet/preview/pet-preview.html`: the browser preview used to agree the look.
 - Speech-to-text (phase 1 piece): whisper.cpp b5454 installed by `npm run setup-whisper` from the official GitHub release and Hugging Face, both SHA-256 checked, into `%APPDATA%\jarvis` (12 MB program after pruning, 78 MB model `ggml-base.en-q8_0.bin`). `WhisperCppStt` runs `whisper-server` on 127.0.0.1 with the model loaded (about 0.4 s to start, about 140 MB RAM) and unloads it after 60 s idle. Audio is sent in memory, never written to disk. `npm run stt-test`: Windows voice into Whisper, 96% of words right (misses were "PROJ142" and "10" for "ten"), about 1 s per request on this CPU. Not yet tried with the user's own voice: `npm run stt-test -- --mic 5`.
 - Footprint measured 2026-11-14: whisper 12 MB + model 78 MB on disk; pet about 116 MB private RAM (Electron, GPU process off); Electron's 144 MB download cache deleted.
-- 164 tests pass (including the Claude CLI lockdown against a fake CLI, the live Windows wake word, one-breath replay, and hotkey-only mode). Phase 1 added tests for the state machine, endpointer, spoken commands, sentence splitting, the conversation (escalation, retrieval tools, stop mid-reply), and the voice loop with a fake mic, keywords, speech and playback.
+- 174 tests pass (including the Claude CLI lockdown, the live Windows wake word, one-breath replay, hotkey-only mode, the pet bridge, and interruptions). Phase 1 added tests for the state machine, endpointer, spoken commands, sentence splitting, the conversation (escalation, retrieval tools, stop mid-reply), and the voice loop with a fake mic, keywords, speech and playback.
 
 Kept lightweight: Node 22.18+ runs the TypeScript directly (type stripping, no build step, no tsx), tests use the built-in `node:test`, and Biome is the only lint/format tool. Dev deps: `typescript`, `@types/node`, `@biomejs/biome`. Runtime deps: `zod`, `yaml`, `@anthropic-ai/sdk`, `@picovoice/pvrecorder-node`, `@picovoice/pvspeaker-node`, `@picovoice/porcupine-node` (4.0.2, 7 MB, prebuilt).
 

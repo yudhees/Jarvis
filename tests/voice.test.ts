@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
 import type { AudioPlayer, KeywordHit, KeywordSpotter } from '@jarvis/core/audio';
-import { Endpointer, parseKeywordLine, WindowsKeywordSpotter } from '@jarvis/core/audio';
+import { BargeIn, Endpointer, parseKeywordLine, WindowsKeywordSpotter } from '@jarvis/core/audio';
 import { loadConfig } from '@jarvis/core/config';
 import { Learner } from '@jarvis/core/learning';
 import { InMemoryFiles } from '@jarvis/core/memory';
@@ -362,7 +362,11 @@ class FakeKeywords implements KeywordSpotter {
 const WAKE = frame(-79);
 const STOP = frame(-78);
 
-function fakeLoop(replyText: string, playMs = 30, opts: { wakeWord?: boolean } = {}) {
+function fakeLoop(
+  replyText: string,
+  playMs = 30,
+  opts: { wakeWord?: boolean; thinkMs?: number; playLevel?: number } = {},
+) {
   const feed = new FrameFeed();
   const keywords = new FakeKeywords();
   keywords.marks.set(WAKE, { keyword: 'wake' });
@@ -386,6 +390,10 @@ function fakeLoop(replyText: string, playMs = 30, opts: { wakeWord?: boolean } =
     play: (pcm, _rate, o) =>
       new Promise((resolve) => {
         played.push(String(pcm.length));
+        const level = opts.playLevel;
+        const meter = level ? setInterval(() => o?.onLevel?.(level), 10) : undefined;
+        o?.signal?.addEventListener('abort', () => clearInterval(meter));
+        setTimeout(() => clearInterval(meter), playMs);
         const t = setTimeout(() => resolve('done'), playMs);
         o?.signal?.addEventListener('abort', () => {
           clearTimeout(t);
@@ -404,6 +412,15 @@ function fakeLoop(replyText: string, playMs = 30, opts: { wakeWord?: boolean } =
     conversation: {
       ask: async (text, o) => {
         asked.push(text);
+        if (opts.thinkMs) {
+          await new Promise<void>((resolve, reject) => {
+            const t = setTimeout(resolve, opts.thinkMs);
+            o.signal?.addEventListener('abort', () => {
+              clearTimeout(t);
+              reject(new Error('aborted'));
+            });
+          });
+        }
         for (const s of replyText.split('|')) o.onSentence(s);
         return {
           reply: replyText,
@@ -663,5 +680,80 @@ describe('heard only the wake word', () => {
     assert.equal(isWakeWordOnly('Jarvis, what time is it?'), false);
     assert.equal(isWakeWordOnly('Travis'), false);
     assert.equal(isWakeWordOnly('Hello'), false);
+  });
+});
+
+describe('talking while Jarvis is busy', () => {
+  it('a pause mid-sentence: the half answer is dropped and the whole sentence is heard', async () => {
+    const t = fakeLoop('Done.', 30, { thinkMs: 3000 });
+    const quit = new AbortController();
+    const running = t.loop.run(quit.signal);
+    t.feed.push(QUIET, 20);
+    t.feed.push(WAKE);
+    say(t.feed); // first half, then a pause long enough to end it
+    await until(() => t.loop.state === 'THINKING' && t.asked.length === 1);
+    t.feed.push(SPEECH, 25); // ...they go on talking
+    await until(() => t.loop.state === 'LISTENING');
+    t.feed.push(QUIET, 12);
+    await until(() => t.heardSeconds.length === 2);
+    const [first = 0, second = 0] = t.heardSeconds;
+    assert.ok(second > first + 0.6, `second take has both parts (${first} s, then ${second} s)`);
+    assert.equal(t.played.length, 0, 'nothing was said for the half sentence');
+    quit.abort();
+    await running;
+  });
+
+  it('talking over Jarvis stops it at once and listens', async () => {
+    const t = fakeLoop('A very long answer.|And more.', 3000);
+    const quit = new AbortController();
+    const running = t.loop.run(quit.signal);
+    t.feed.push(QUIET, 20);
+    t.feed.push(WAKE);
+    say(t.feed);
+    await until(() => t.loop.state === 'SPEAKING');
+    t.feed.push(SPEECH, 12);
+    await until(() => t.loop.state === 'LISTENING');
+    await tick(50);
+    assert.equal(t.played.length, 1, 'the rest of the answer was not played');
+    quit.abort();
+    await running;
+  });
+
+  it("Jarvis's own voice through the speakers does not interrupt it", async () => {
+    const t = fakeLoop('A long answer.', 1500, { playLevel: 0.3 }); // about -10 dBFS out
+    const quit = new AbortController();
+    const running = t.loop.run(quit.signal);
+    t.feed.push(QUIET, 20);
+    t.feed.push(WAKE);
+    say(t.feed);
+    await until(() => t.loop.state === 'SPEAKING');
+    for (let i = 0; i < 30; i++) {
+      t.feed.push(frame(-30)); // the echo: 20 dB under what is played
+      await tick(8);
+    }
+    assert.equal(t.loop.state, 'SPEAKING');
+    quit.abort();
+    await running;
+  });
+});
+
+describe('BargeIn', () => {
+  const opts = { frameMs: 32, minSpeechMs: 280 };
+  it('needs a moment of real speech, not a click', () => {
+    const b = new BargeIn(opts);
+    assert.equal(b.push(SPEECH, 0, -70), false);
+    assert.equal(b.push(QUIET, 0, -70), false);
+    let hit = false;
+    for (let i = 0; i < 9; i++) hit = b.push(SPEECH, 0, -70);
+    assert.equal(hit, true);
+  });
+
+  it('learns the echo level and still hears a louder voice over it', () => {
+    const b = new BargeIn(opts);
+    const out = 10 ** (-10 / 20); // playing at -10 dBFS
+    for (let i = 0; i < 60; i++) assert.equal(b.push(frame(-30), out, -70), false, 'echo');
+    let hit = false;
+    for (let i = 0; i < 9; i++) hit = b.push(frame(-8), out, -70);
+    assert.equal(hit, true, 'the user, 22 dB above the echo');
   });
 });

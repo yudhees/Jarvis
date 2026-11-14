@@ -352,7 +352,19 @@ export class Conversation {
         now: spokenNow(this.#o.now?.() ?? new Date()),
         retrieval: this.#tools.some((t) => t.name === 'memory_search'),
       });
-      const result = await this.#streamOnce(model, tier, prompt, say, options.signal);
+      let result: { text: string; escalate: boolean; usage: ModelUsage };
+      try {
+        result = await this.#streamOnce(model, tier, prompt, say, options.signal);
+      } catch (err) {
+        // Cancelled or failed: take the unanswered request back out, so the
+        // history never has two user turns in a row (the user may say it again,
+        // or a longer version of it).
+        const last = this.#history.at(-1);
+        if (generation === this.#generation && last?.role === 'user' && last.content === request) {
+          this.#history.pop();
+        }
+        throw err;
+      }
       usage.inputTokens += result.usage.inputTokens;
       usage.outputTokens += result.usage.outputTokens;
       usage.toolCalls += result.usage.toolCalls;

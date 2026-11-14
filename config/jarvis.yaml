@@ -12,7 +12,8 @@ audio:
 listening:
   maxRecordSeconds: 15
   followUpSeconds: 8
-  silenceMs: 800 # this much quiet ends what you are saying
+  silenceMs: 1000 # this much quiet ends what you are saying (pause longer and it answers)
+  bargeIn: true # talk while Jarvis thinks or speaks: it stops and listens
   startTimeoutSeconds: 5 # after "Jarvis", give up if you say nothing
 
 keywords: # how Jarvis hears "Jarvis" (Ctrl+Alt+L always works too)
@@ -50,6 +51,9 @@ files:
 
 retention:
   transcriptDays: 30
+
+pet:
+  enabled: true # open the desktop pet with npm start (Jarvis works without it)
 
 brain: # who answers
   provider: claude-cli # your Claude subscription through Claude Code (no API key, no extra billing); or: api

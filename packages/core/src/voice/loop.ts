@@ -1,6 +1,13 @@
 import type { CoreToPetEvent, JarvisState } from '@jarvis/shared';
 import type { AudioPlayer } from '../audio/index.ts';
-import { Endpointer, type KeywordSpotter, NoiseFloor, rmsLevel } from '../audio/index.ts';
+import {
+  BargeIn,
+  Endpointer,
+  type KeywordSpotter,
+  NoiseFloor,
+  rmsLevel,
+  toDbfs,
+} from '../audio/index.ts';
 import { StateMachine } from '../state/index.ts';
 import type { SttProvider } from '../stt/index.ts';
 import type { TtsProvider } from '../tts/index.ts';
@@ -17,6 +24,8 @@ export interface VoiceLoopTiming {
   followUpMs: number;
   /** Say "Still working on it" if nothing has been spoken by then. */
   fillerMs: number;
+  /** Stop and listen when the user talks while Jarvis thinks or speaks (default on). */
+  bargeIn?: boolean;
 }
 
 /** The parts of Conversation the loop uses. */
@@ -72,6 +81,20 @@ export interface VoiceLoopDeps {
 const RECENT_FRAMES = 320;
 /** Audio kept from just before the phrase start, so the first syllable is not cut. */
 const REPLAY_MARGIN_SECONDS = 0.25;
+/** The user must talk this long over Jarvis to interrupt it (coughs and clicks don't). */
+const BARGE_IN_MS = 280;
+/** Audio kept from before the interruption was noticed. */
+const BARGE_IN_REPLAY_SECONDS = BARGE_IN_MS / 1000 + 0.05;
+/** Frames quieter than this at the end of a request are the pause, not words. */
+const TRAILING_QUIET_DBFS = -50;
+
+/** Where the last loud frame of `pcm` ends (trailing quiet cut off). */
+function speechEnd(pcm: Int16Array, frameLength: number): number {
+  for (let at = pcm.length - frameLength; at >= 0; at -= frameLength) {
+    if (toDbfs(rmsLevel(pcm, at, at + frameLength)) > TRAILING_QUIET_DBFS) return at + frameLength;
+  }
+  return 0;
+}
 
 export class VoiceLoop {
   readonly #d: VoiceLoopDeps;
@@ -87,9 +110,18 @@ export class VoiceLoop {
   readonly #recent: { frame: Int16Array; start: number }[] = [];
   /** Samples given to the keyword spotter so far (positions are counted the same way). */
   #samples = 0;
+  readonly #barge: BargeIn;
+  /** Level of what Jarvis is playing right now (0..1), for telling its echo from the user. */
+  #playing = 0;
+  /** Audio of the request being answered, joined with the rest if the user goes on talking. */
+  #utterance: Int16Array | undefined;
 
   constructor(deps: VoiceLoopDeps) {
     this.#d = deps;
+    this.#barge = new BargeIn({
+      frameMs: (deps.timing.frameLength / deps.timing.sampleRate) * 1000,
+      minSpeechMs: BARGE_IN_MS,
+    });
     this.#sm = new StateMachine((state) => {
       deps.emit({ type: 'state', state });
       // Without a wake word nothing needs to hear the room while asleep: release the mic.
@@ -215,7 +247,37 @@ export class VoiceLoop {
       this.#replay(hit.startSample);
       return;
     }
+    if ((state === 'THINKING' || state === 'SPEAKING') && this.#d.timing.bargeIn !== false) {
+      if (this.#barge.push(frame, this.#playing, this.#floor.dbfs)) this.#bargeIn(state);
+      return;
+    }
     this.#feed(frame);
+  }
+
+  #onSpeakLevel(level: number): void {
+    this.#playing = level;
+    this.#d.emit({ type: 'speak_level', level });
+  }
+
+  /**
+   * The user talks while Jarvis is busy. Thinking (nothing said yet): they had
+   * only paused, so the answer is dropped and their whole sentence is heard
+   * again, earlier part included. Speaking: Jarvis stops at once and listens.
+   */
+  #bargeIn(state: 'THINKING' | 'SPEAKING'): void {
+    const earlier = state === 'THINKING' ? this.#utterance : undefined;
+    this.#cancelTask();
+    this.#barge.reset();
+    this.#listen(this.#d.timing.startTimeoutMs);
+    if (earlier) {
+      // Their earlier words, without the pause at the end (that pause plus the
+      // one before they went on would otherwise count as "finished").
+      const n = this.#d.timing.frameLength;
+      const end = speechEnd(earlier, n);
+      for (let i = 0; i < end && this.#ep; i += n) this.#feed(earlier.subarray(i, i + n));
+    }
+    // From where they started talking again.
+    this.#replay(this.#samples - this.#d.timing.sampleRate * BARGE_IN_REPLAY_SECONDS, 0);
   }
 
   /**
@@ -223,9 +285,9 @@ export class VoiceLoop {
    * the wake word was recognized, so run the recent audio from the phrase start
    * through the endpointer.
    */
-  #replay(startSample: number | undefined): void {
+  #replay(startSample: number | undefined, marginSeconds = REPLAY_MARGIN_SECONDS): void {
     if (startSample === undefined) return;
-    const from = startSample - this.#d.timing.sampleRate * REPLAY_MARGIN_SECONDS;
+    const from = startSample - this.#d.timing.sampleRate * marginSeconds;
     for (const { frame, start } of this.#recent) {
       if (start + frame.length <= from) continue;
       if (!this.#ep) return; // the replayed audio already ended the request
@@ -272,6 +334,7 @@ export class VoiceLoop {
   #cancelTask(): void {
     this.#task?.abort();
     this.#task = undefined;
+    this.#playing = 0;
   }
 
   /** One request: transcribe, answer, speak, then the follow-up window. */
@@ -281,6 +344,8 @@ export class VoiceLoop {
     const { signal } = task;
     const t0 = performance.now();
     const log: TurnLog = { heard: '', sttMs: 0, firstAudioMs: null, totalMs: 0, stopped: false };
+    this.#utterance = pcm;
+    this.#barge.reset();
     let filler: NodeJS.Timeout | undefined;
     this.#sm.to('THINKING');
     try {
@@ -324,7 +389,7 @@ export class VoiceLoop {
           if (!signal.aborted) this.#sm.to('SPEAKING');
         },
         onSentence: (s) => this.#d.emit({ type: 'reply_text', text: s }),
-        onLevel: (level) => this.#d.emit({ type: 'speak_level', level }),
+        onLevel: (level) => this.#onSpeakLevel(level),
       });
       filler = setTimeout(() => {
         if (!queue.started) queue.say('Still working on it.');
@@ -366,13 +431,14 @@ export class VoiceLoop {
         if (!signal.aborted) this.#sm.to('SPEAKING');
       },
       onSentence: (s) => this.#d.emit({ type: 'reply_text', text: s }),
-      onLevel: (level) => this.#d.emit({ type: 'speak_level', level }),
+      onLevel: (level) => this.#onSpeakLevel(level),
     });
     queue.say(text);
     if ((await queue.done()) === 'done' && !signal.aborted) this.#followUp();
   }
 
   #followUp(): void {
+    this.#playing = 0;
     this.#sm.to('FOLLOW_UP');
     this.#ep = this.#newEndpointer(this.#d.timing.followUpMs);
   }
