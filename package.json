@@ -19,7 +19,9 @@
     "mic-test": "node scripts/mic-test.ts",
     "speaker-test": "node scripts/speaker-test.ts",
     "learn-repl": "node scripts/learn-repl.ts",
-    "pet": "npm start -w @jarvis/pet"
+    "pet": "npm start -w @jarvis/pet",
+    "setup-whisper": "node scripts/setup-whisper.ts",
+    "stt-test": "node scripts/stt-test.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.4",

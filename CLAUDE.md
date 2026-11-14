@@ -485,12 +485,13 @@ Done when: a stated preference changes the next reply, a corrected name is trans
 9. Small commits with clear messages. Run lint and tests before saying a phase is done.
 10. After each phase, update the "Status" section below with what works, what is stubbed, and known issues.
 11. Track work as GitHub issues on `origin` (`gh issue create`): one issue per phase, plus one per bug or known issue found. Each commit that finishes an issue ends its message with `Fixes #N`, so the issue closes automatically when the commit reaches `master` on GitHub. Push after each finished issue. Open a new issue for anything left undone instead of keeping it only in the Status section.
+12. Keep Jarvis light on the user's PC (disk and memory). Measure before and after any change that adds a download, a process, or a dependency. Delete installer leftovers and tools Jarvis does not run, unload models when idle (whisper: `stt.idleStopSeconds`), give the pet no GPU process, and prefer small models and built-in Node features over new packages.
 
 ## 17. Decisions still open (ask the user)
 
 Needed by phase 1:
 
-- Speech-to-text: fully local (private, batch only, slower) or a cloud streaming service (faster, audio leaves the PC)?
+- ~~Speech-to-text~~: decided 2026-11-14, local whisper.cpp (installed, see Status).
 - Voice: built-in Windows voice, or a more natural one?
 
 Needed by phase 3:
@@ -520,7 +521,9 @@ Needed by phase 4 / 6:
 - Hide pet and Hide when idle (default on, 8 s); the wake word and recording always bring the pet back.
 - Desktop pet, phase 4 app shell (`npm run pet`): Electron, transparent and always on top above the taskbar, click-through except the pet and bubble, draggable with remembered position, tray menu (mute, stop, demo, settings folder, start with Windows, quit), all states and the speech bubble. Main process runs TypeScript directly; the sandboxed preload and the window script are plain JS. Events from core are validated before display and shown with `textContent` only. Until core's WebSocket bridge exists it runs in demo mode (click the pet, or `JARVIS_PET_DEMO=1`). Checked on screen: window, badge, held tool icon, reply bubble, follow-up ring. Not yet seen on screen: the amber approval bubble (screen locked during capture). Still to do for phase 4: core's bridge server, hotkeys in core.
 - `packages/pet/preview/pet-preview.html`: the browser preview used to agree the look.
-- 127 tests pass.
+- Speech-to-text (phase 1 piece): whisper.cpp b5454 installed by `npm run setup-whisper` from the official GitHub release and Hugging Face, both SHA-256 checked, into `%APPDATA%\jarvis` (12 MB program after pruning, 78 MB model `ggml-base.en-q8_0.bin`). `WhisperCppStt` runs `whisper-server` on 127.0.0.1 with the model loaded (about 0.4 s to start, about 140 MB RAM) and unloads it after 60 s idle. Audio is sent in memory, never written to disk. `npm run stt-test`: Windows voice into Whisper, 96% of words right (misses were "PROJ142" and "10" for "ten"), about 1 s per request on this CPU. Not yet tried with the user's own voice: `npm run stt-test -- --mic 5`.
+- Footprint measured 2026-11-14: whisper 12 MB + model 78 MB on disk; pet about 116 MB private RAM (Electron, GPU process off); Electron's 144 MB download cache deleted.
+- 130 tests pass.
 
 Kept lightweight: Node 22.18+ runs the TypeScript directly (type stripping, no build step, no tsx), tests use the built-in `node:test`, and Biome is the only lint/format tool. Dev deps: `typescript`, `@types/node`, `@biomejs/biome`. Runtime deps: `zod`, `yaml`, `@picovoice/pvrecorder-node`, `@picovoice/pvspeaker-node`.
 

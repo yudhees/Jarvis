@@ -47,6 +47,16 @@ let petVisible = false;
 
 if (!app.requestSingleInstanceLock()) app.quit();
 
+// Keep the pet light: it draws a few SVG shapes, so it needs no GPU process,
+// a small JavaScript heap, and none of Chromium's background extras.
+app.disableHardwareAcceleration();
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=48');
+app.commandLine.appendSwitch(
+  'disable-features',
+  'SpareRendererForSitePerProcess,CalculateNativeWinOcclusion,MediaRouter,Translate',
+);
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+
 // ---------- position: remembered, and always kept on a screen ----------
 
 const positionFile = () => path.join(app.getPath('userData'), 'pet-position.json');

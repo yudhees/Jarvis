@@ -83,6 +83,14 @@ export const jarvisSchema = z.strictObject({
   retention: z.strictObject({
     transcriptDays: positiveInt,
   }),
+  stt: z.strictObject({
+    provider: z.literal('whisper-cpp'),
+    model: z.string().regex(/^ggml-[\w.-]+\.bin$/, 'must be a ggml-*.bin model file name'),
+    language: z.string().regex(/^[a-z]{2}$/),
+    threads: z.int().min(1).max(32),
+    port: z.int().min(1024).max(65535),
+    idleStopSeconds: z.int().min(0).max(86400),
+  }),
   learning: z.strictObject({
     enabled: z.boolean(),
     aboutUserTokenCap: positiveInt,

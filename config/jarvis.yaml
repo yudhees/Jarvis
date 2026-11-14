@@ -41,6 +41,14 @@ files:
 retention:
   transcriptDays: 30
 
+stt: # speech-to-text: turns what you say into text for Claude
+  provider: whisper-cpp # runs on this PC; install with: npm run setup-whisper
+  model: ggml-base.en-q8_0.bin # bigger and more accurate: ggml-small.en-q5_1.bin
+  language: en
+  threads: 4
+  port: 8178 # local whisper-server, bound to 127.0.0.1 only
+  idleStopSeconds: 60 # unload the model after a minute of no speech (frees ~140 MB RAM); 0 = keep loaded
+
 learning:
   enabled: true
   aboutUserTokenCap: 300
