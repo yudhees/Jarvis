@@ -1,0 +1,588 @@
+<title>Jarvis Pet Preview</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: control console on the left, a Windows desktop corner on the right with the pet above the taskbar. */
+:root {
+  --bg: #eef1f6;
+  --panel: #ffffff;
+  --ink: #141a26;
+  --muted: #5b6577;
+  --line: #d9dee8;
+  --accent: #2a6df4;
+  --accent-ink: #ffffff;
+  --glow: #3fd0ff;
+  --amber: #f0a020;
+  --danger: #e5484d;
+  --ok: #1f9d6b;
+  --desk-a: #c9d7f2;
+  --desk-b: #e7ddf3;
+  --taskbar: rgba(245, 247, 252, 0.86);
+  --bot-shell: #f7f9fc;
+  --bot-edge: #c4ccda;
+  --visor: #0f1726;
+  --bubble: #ffffff;
+  --bubble-ink: #141a26;
+  --font-display: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+  --font-body: "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", Consolas, ui-monospace, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1118; --panel: #151b26; --ink: #e8ecf3; --muted: #9aa5b8; --line: #263043;
+    --accent: #5b8fff; --accent-ink: #0d1118; --glow: #4fd8ff; --amber: #f5b13d; --danger: #ff6369; --ok: #3ccf91;
+    --desk-a: #1a2440; --desk-b: #2a1e3d; --taskbar: rgba(20, 25, 36, 0.86);
+    --bot-shell: #dfe5ef; --bot-edge: #8d98ab; --visor: #0a0f19; --bubble: #1d2533; --bubble-ink: #e8ecf3;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1118; --panel: #151b26; --ink: #e8ecf3; --muted: #9aa5b8; --line: #263043;
+  --accent: #5b8fff; --accent-ink: #0d1118; --glow: #4fd8ff; --amber: #f5b13d; --danger: #ff6369; --ok: #3ccf91;
+  --desk-a: #1a2440; --desk-b: #2a1e3d; --taskbar: rgba(20, 25, 36, 0.86);
+  --bot-shell: #dfe5ef; --bot-edge: #8d98ab; --visor: #0a0f19; --bubble: #1d2533; --bubble-ink: #e8ecf3;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { min-height: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--font-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 28px;
+}
+.app { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: 20px; max-width: 1180px; margin: 0 auto; }
+@media (max-width: 860px) { .app { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- Left console ---------- */
+.console { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.brand { display: flex; align-items: baseline; gap: 10px; }
+.brand h1 { font: 700 24px/1.1 var(--font-display); margin: 0; letter-spacing: -0.01em; }
+.brand span { font: 500 12px var(--font-mono); color: var(--muted); }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.card h2 { margin: 0; font: 600 12px var(--font-display); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.states { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+button {
+  font: 500 13px var(--font-body); color: var(--ink); background: transparent; border: 1px solid var(--line);
+  border-radius: 8px; padding: 7px 10px; cursor: pointer; text-align: left; display: flex; align-items: center; gap: 8px;
+}
+button:hover { border-color: var(--accent); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; opacity: .55; flex: none; }
+.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); justify-content: center; font-weight: 600; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; }
+.row > * { flex: 1 1 auto; }
+form { display: flex; gap: 8px; }
+input[type="text"] {
+  flex: 1; min-width: 0; font: 14px var(--font-body); color: var(--ink); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+}
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font: 12px var(--font-body); padding: 4px 8px; border-radius: 999px; }
+.route { font: 12px/1.6 var(--font-mono); color: var(--muted); background: var(--bg); border-radius: 8px; padding: 8px 10px; overflow-wrap: anywhere; min-height: 3.4em; }
+.route b { color: var(--ink); font-weight: 500; }
+.log { font: 12px/1.6 var(--font-mono); color: var(--muted); max-height: 168px; overflow-y: auto; margin: 0; padding: 0; list-style: none; }
+.log li { display: flex; gap: 8px; }
+.log time { color: var(--accent); flex: none; }
+.note { font-size: 12px; color: var(--muted); margin: 0; }
+.approve-row { display: none; gap: 8px; }
+.approve-row.on { display: flex; }
+.approve-row button { flex: 1; justify-content: center; }
+#approveBtn { border-color: var(--ok); }
+#cancelBtn { border-color: var(--danger); }
+
+/* ---------- Right: desktop stage ---------- */
+.stage {
+  position: relative; border-radius: 14px; overflow: hidden; min-height: 560px; border: 1px solid var(--line);
+  background:
+    radial-gradient(1200px 500px at 15% 10%, var(--desk-b), transparent 60%),
+    linear-gradient(160deg, var(--desk-a), var(--desk-b));
+}
+.window {
+  position: absolute; left: 6%; top: 8%; width: min(420px, 62%); height: 46%; border-radius: 10px;
+  background: var(--panel); opacity: .72; border: 1px solid var(--line);
+}
+.window::before { content: ""; display: block; height: 28px; border-bottom: 1px solid var(--line); }
+.window p { margin: 10px 14px; color: var(--muted); font: 12px var(--font-mono); }
+.taskbar {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 46px; background: var(--taskbar);
+  backdrop-filter: blur(12px); border-top: 1px solid var(--line); display: flex; align-items: center; justify-content: flex-end; gap: 14px; padding: 0 14px;
+  font: 12px var(--font-mono); color: var(--muted);
+}
+.tray { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; border: 1px solid var(--line); position: relative; }
+.tray svg { width: 14px; height: 14px; }
+.tray .mic { position: absolute; right: -3px; top: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); display: none; }
+.stage.rec .tray .mic { display: block; }
+
+.pet { position: absolute; right: 22px; bottom: 58px; width: 160px; height: 160px; cursor: grab; }
+.pet svg { width: 100%; height: 100%; overflow: visible; }
+
+/* Speech bubble */
+.bubble {
+  position: absolute; right: 24px; bottom: 226px; width: min(300px, calc(100% - 48px));
+  background: var(--bubble); color: var(--bubble-ink); border-radius: 14px; padding: 12px 14px;
+  border: 1px solid var(--line); box-shadow: 0 10px 30px rgba(10, 20, 40, .18);
+  font-size: 14px; transition: opacity .35s, transform .35s; transform-origin: bottom right;
+}
+.bubble.hidden { opacity: 0; transform: translateY(6px) scale(.97); pointer-events: none; }
+.bubble::after {
+  content: ""; position: absolute; right: 64px; bottom: -8px; width: 14px; height: 14px; background: var(--bubble);
+  border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); transform: rotate(45deg);
+}
+.bubble .who { font: 600 11px var(--font-display); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: 4px; display: flex; justify-content: space-between; }
+.bubble.approval { border: 2px solid var(--amber); }
+.bubble.approval::after { border-color: var(--amber); border-width: 0 2px 2px 0; border-style: solid; }
+.bubble .say { margin-top: 8px; font: 600 13px var(--font-body); display: flex; gap: 6px; align-items: center; }
+.bubble .code { font: 600 13px var(--font-mono); background: var(--bg); border-radius: 6px; padding: 2px 6px; }
+.badge { font: 600 11px var(--font-mono); padding: 1px 6px; border-radius: 6px; background: var(--bg); color: var(--ink); }
+
+/* ---------- Pet parts & states ---------- */
+.ring { fill: none; stroke: var(--glow); stroke-width: 3; opacity: 0; transform-origin: 80px 82px; }
+.shell { fill: var(--bot-shell); stroke: var(--bot-edge); stroke-width: 2; transition: fill .3s, stroke .3s; }
+.visor { fill: var(--visor); }
+.eye { fill: var(--glow); transition: transform .25s; transform-box: fill-box; transform-origin: center; }
+.lid { stroke: var(--glow); stroke-width: 3; stroke-linecap: round; fill: none; display: none; }
+.spiral { display: none; fill: none; stroke: var(--glow); stroke-width: 2; }
+.mouth { fill: var(--glow); transform-box: fill-box; transform-origin: center; opacity: .9; }
+.antenna-light { fill: var(--glow); }
+.cheek { fill: var(--glow); opacity: .18; }
+.hand { fill: var(--bot-shell); stroke: var(--bot-edge); stroke-width: 2; transform-box: fill-box; transform-origin: bottom center; transition: transform .35s; }
+.think-dots circle { fill: var(--glow); }
+.think-dots { display: none; transform-origin: 80px 30px; }
+.zz { display: none; font: 700 16px var(--font-display); fill: var(--muted); }
+.held { display: none; }
+.model-tag { display: none; }
+.model-tag rect { fill: var(--accent); }
+.model-tag text { fill: var(--accent-ink); font: 700 13px var(--font-mono); }
+.mute-icon, .battery { display: none; }
+.outline { fill: none; stroke: var(--amber); stroke-width: 3; stroke-dasharray: 6 5; display: none; }
+
+.pet .body { transform-origin: 80px 140px; }
+
+/* SLEEPING */
+.pet[data-state="SLEEPING"] .body { animation: breathe 4s ease-in-out infinite; opacity: .78; }
+.pet[data-state="SLEEPING"] .eye { display: none; }
+.pet[data-state="SLEEPING"] .lid { display: block; }
+.pet[data-state="SLEEPING"] .zz { display: block; animation: floatz 3s ease-in-out infinite; }
+.pet[data-state="SLEEPING"] .mouth { transform: scaleY(.4); }
+/* LISTENING */
+.pet[data-state="LISTENING"] .ring { opacity: .85; }
+.pet[data-state="LISTENING"] .eye { transform: scale(1.08); }
+/* THINKING */
+.pet[data-state="THINKING"] .eye { transform: translateY(-5px) scale(.9); }
+.pet[data-state="THINKING"] .think-dots { display: block; animation: spin 1.4s linear infinite; }
+.pet[data-state="THINKING"] .model-tag { display: block; }
+/* TOOL */
+.pet[data-tool="on"] .held { display: block; }
+.pet[data-tool="on"] .hand.right { transform: rotate(-35deg) translate(4px, -4px); }
+/* AWAITING_APPROVAL */
+.pet[data-state="AWAITING_APPROVAL"] .hand.left { transform: rotate(40deg) translate(-6px, -18px); }
+.pet[data-state="AWAITING_APPROVAL"] .outline { display: block; animation: march 1.2s linear infinite; }
+.pet[data-state="AWAITING_APPROVAL"] .shell { stroke: var(--amber); }
+/* SPEAKING */
+.pet[data-state="SPEAKING"] .eye { transform: scaleY(.85); }
+/* FOLLOW_UP */
+.pet[data-state="FOLLOW_UP"] .ring { opacity: .45; stroke-dasharray: 4 6; animation: spin 6s linear infinite; }
+/* MUTED */
+.pet[data-state="MUTED"] .shell { fill: var(--line); }
+.pet[data-state="MUTED"] .eye, .pet[data-state="MUTED"] .mouth, .pet[data-state="MUTED"] .antenna-light, .pet[data-state="MUTED"] .cheek { fill: var(--muted); }
+.pet[data-state="MUTED"] .mute-icon { display: block; }
+.pet[data-state="MUTED"] .body { opacity: .8; }
+/* ERROR */
+.pet[data-state="ERROR"] .eye { display: none; }
+.pet[data-state="ERROR"] .spiral { display: block; animation: spin 1s linear infinite; transform-box: fill-box; transform-origin: center; }
+.pet[data-state="ERROR"] .body { animation: wobble .5s ease-in-out 3; }
+/* Budget */
+.pet[data-budget="warn"] .battery { display: block; }
+
+@keyframes breathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.03, .97); } }
+@keyframes floatz { 0% { transform: translate(0,0); opacity: 0; } 30% { opacity: 1; } 100% { transform: translate(10px,-18px); opacity: 0; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes march { to { stroke-dashoffset: -22; } }
+@keyframes wobble { 0%,100% { transform: rotate(0); } 25% { transform: rotate(-6deg); } 75% { transform: rotate(6deg); } }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+</style>
+
+<div class="app">
+  <aside class="console" aria-labelledby="console-h">
+    <div class="brand"><h1 id="console-h">Jarvis</h1><span>pet preview · phase 4</span></div>
+
+    <section class="card" aria-labelledby="try-h">
+      <h2 id="try-h">Say something</h2>
+      <form id="askForm">
+        <input id="askInput" type="text" autocomplete="off" placeholder="Hi Jarvis, move PROJ-142 to In Review" aria-label="What you say to Jarvis">
+        <button class="primary" type="submit">Say</button>
+      </form>
+      <div class="chips" role="group" aria-label="Example requests">
+        <button type="button" class="chip" data-ask="what time is it in Tokyo">Time in Tokyo</button>
+        <button type="button" class="chip" data-ask="move PROJ-142 to In Review and tell the team on slack">Move Jira ticket</button>
+        <button type="button" class="chip" data-ask="why is the orders mongodb query slow">Slow MongoDB query</button>
+        <button type="button" class="chip" data-ask="debug why the login service times out and find the root cause">Debug root cause</button>
+        <button type="button" class="chip" data-ask="delete the branch feature-login">Delete a branch</button>
+      </div>
+      <div class="route" id="route" aria-live="polite">Routing appears here: kind, model, speed, and why.</div>
+      <div class="approve-row" id="approveRow">
+        <button type="button" id="approveBtn">Say "approve"</button>
+        <button type="button" id="cancelBtn">Say "cancel"</button>
+      </div>
+      <p class="note">These two buttons stand in for your voice. The real pet has no approve button: approval is voice only.</p>
+    </section>
+
+    <section class="card" aria-labelledby="states-h">
+      <h2 id="states-h">States</h2>
+      <div class="states" id="states">
+        <button type="button" data-state="SLEEPING"><span class="dot"></span>Sleeping</button>
+        <button type="button" data-state="LISTENING"><span class="dot"></span>Listening</button>
+        <button type="button" data-state="THINKING"><span class="dot"></span>Thinking</button>
+        <button type="button" data-state="TOOL"><span class="dot"></span>Tool running</button>
+        <button type="button" data-state="AWAITING_APPROVAL"><span class="dot"></span>Approval</button>
+        <button type="button" data-state="SPEAKING"><span class="dot"></span>Speaking</button>
+        <button type="button" data-state="FOLLOW_UP"><span class="dot"></span>Follow-up</button>
+        <button type="button" data-state="MUTED"><span class="dot"></span>Muted</button>
+        <button type="button" data-state="ERROR"><span class="dot"></span>Error</button>
+        <button type="button" id="budgetBtn" aria-pressed="false"><span class="dot"></span>Budget 80%</button>
+      </div>
+      <div class="row">
+        <button type="button" class="primary" id="demoBtn">Play a full request</button>
+        <button type="button" id="stopBtn">Jarvis, stop</button>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="log-h">
+      <h2 id="log-h">Events to the pet</h2>
+      <ul class="log" id="log"></ul>
+    </section>
+  </aside>
+
+  <main class="stage" id="stage">
+    <div class="window" aria-hidden="true"><p>// your work stays in front; the pet ignores clicks except on itself</p></div>
+
+    <div class="bubble hidden" id="bubble" role="status" aria-live="polite">
+      <div class="who"><span id="bubbleWho">Jarvis</span><span class="badge" id="bubbleBadge" hidden></span></div>
+      <div id="bubbleText"></div>
+      <div class="say" id="bubbleSay" hidden></div>
+    </div>
+
+    <div class="pet" id="pet" data-state="SLEEPING" data-tool="off" data-budget="ok" title="Drag me">
+      <svg viewBox="0 0 160 160" role="img" aria-label="Jarvis pet">
+        <g class="body">
+          <circle class="ring" id="ring" cx="80" cy="82" r="62"/>
+          <rect class="outline" x="14" y="22" width="132" height="126" rx="36"/>
+          <!-- antenna -->
+          <line x1="80" y1="34" x2="80" y2="20" stroke="var(--bot-edge)" stroke-width="3" stroke-linecap="round"/>
+          <circle class="antenna-light" cx="80" cy="17" r="5"/>
+          <!-- hands -->
+          <rect class="hand left" x="18" y="98" width="16" height="30" rx="8"/>
+          <rect class="hand right" x="126" y="98" width="16" height="30" rx="8"/>
+          <!-- head/body -->
+          <rect class="shell" x="28" y="32" width="104" height="104" rx="34"/>
+          <rect class="visor" x="40" y="52" width="80" height="50" rx="22"/>
+          <!-- eyes -->
+          <ellipse class="eye" cx="64" cy="75" rx="7" ry="9"/>
+          <ellipse class="eye" cx="96" cy="75" rx="7" ry="9"/>
+          <path class="lid" d="M57 77 q7 5 14 0 M89 77 q7 5 14 0"/>
+          <path class="spiral" d="M64 75 m-6 0 a6 6 0 1 1 6 6 a4 4 0 1 1 -4 -4 M96 75 m-6 0 a6 6 0 1 1 6 6 a4 4 0 1 1 -4 -4"/>
+          <circle class="cheek" cx="50" cy="92" r="5"/>
+          <circle class="cheek" cx="110" cy="92" r="5"/>
+          <rect class="mouth" id="mouth" x="72" y="88" width="16" height="4" rx="2"/>
+          <!-- thinking dots -->
+          <g class="think-dots"><circle cx="80" cy="6" r="3.2"/><circle cx="100" cy="12" r="2.6" opacity=".7"/><circle cx="60" cy="12" r="2.2" opacity=".45"/></g>
+          <g class="model-tag" transform="translate(112 30)"><rect width="26" height="20" rx="6"/><text id="modelTag" x="13" y="14.5" text-anchor="middle">H</text></g>
+          <text class="zz" x="118" y="34">z</text>
+          <!-- held tool icon -->
+          <g class="held" transform="translate(132 78)" id="held"></g>
+          <!-- muted -->
+          <g class="mute-icon" transform="translate(54 140)">
+            <rect x="0" y="0" width="52" height="16" rx="8" fill="var(--panel)" stroke="var(--line)"/>
+            <text x="26" y="11.5" text-anchor="middle" font-family="var(--font-mono)" font-size="9" fill="var(--muted)">mic off</text>
+          </g>
+          <!-- budget battery -->
+          <g class="battery" transform="translate(16 30)">
+            <rect x="0" y="0" width="22" height="12" rx="3" fill="var(--panel)" stroke="var(--amber)" stroke-width="2"/>
+            <rect x="22" y="3.5" width="3" height="5" rx="1" fill="var(--amber)"/>
+            <rect x="2.5" y="2.5" width="5" height="7" rx="1" fill="var(--amber)"/>
+          </g>
+        </g>
+      </svg>
+    </div>
+
+    <div class="taskbar">
+      <span id="clock">11:40</span>
+      <span class="tray" title="Jarvis tray icon">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="4" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="6" cy="8" r="1.4" fill="currentColor"/><circle cx="10" cy="8" r="1.4" fill="currentColor"/></svg>
+        <span class="mic" role="img" aria-label="Microphone recording"></span>
+      </span>
+    </div>
+  </main>
+</div>
+
+<script>
+(() => {
+  const pet = document.getElementById('pet');
+  const stage = document.getElementById('stage');
+  const ring = document.getElementById('ring');
+  const mouth = document.getElementById('mouth');
+  const bubble = document.getElementById('bubble');
+  const bubbleText = document.getElementById('bubbleText');
+  const bubbleWho = document.getElementById('bubbleWho');
+  const bubbleBadge = document.getElementById('bubbleBadge');
+  const bubbleSay = document.getElementById('bubbleSay');
+  const routeBox = document.getElementById('route');
+  const logEl = document.getElementById('log');
+  const approveRow = document.getElementById('approveRow');
+  const modelTag = document.getElementById('modelTag');
+  const held = document.getElementById('held');
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---------- Router: same rules as packages/core/src/router (Haiku first) ---------- */
+  const RULES = [
+    ['github', /\b(github|pull requests?|prs?|repos?|repository|commits?|branch(es)?|merge)\b/],
+    ['jira', /\b(jira|tickets?|sprints?|backlog|epics?|story points?|proj-\d+)\b/],
+    ['slack', /\b(slack|channels?|dms?|direct messages?)\b/],
+    ['email', /\b(e-?mails?|mail|inbox|gmail|outlook)\b/],
+    ['calendar', /\b(calendar|meetings?|appointments?|events?|invites?|schedule)\b/],
+    ['code', /\b(code|coding|bugs?|debug\w*|functions?|compile\w*|stack trace|typescript|python|javascript|refactor\w*|unit tests?|programming|scripts?|regex|mongodb|query)\b/],
+    ['files', /\b(files?|folders?|documents?|pdfs?|downloads?)\b/],
+    ['system', /\b(volume|brightness|open|launch|close|apps?|application|window|wi-?fi|bluetooth|screenshot|clipboard|mute|unmute)\b/],
+    ['web', /\b(search|google|look up|websites?|web ?pages?|news|browse|online|weather)\b/],
+    ['planning', /\b(plan|planning|strategy|architecture|design|roadmap|research|compare|analy[sz]e|analysis|trade-?offs?)\b/],
+    ['writing', /\b(write|draft|rewrite|rephrase|summari[sz]e|summary|translate|proofread|essay|letter)\b/],
+  ];
+  const TASK_VERBS = /\b(send|create|make|open|close|set|start|stop|delete|remove|write|draft|read|check|find|search|look|show|list|summari[sz]e|book|schedule|remind|post|reply|update|edit|move|play|call|fix|build|run|deploy|plan|research|compare|explain|debug|translate|calculate|review|refactor|analy[sz]e|investigate|tell)\b/i;
+  const COMPLEX = /\b(step by step|multi-?step|and then|end to end|architecture|refactor|root cause|investigate|debug|review (?:the|this|my) (?:pr|pull request|code|design)|trade-?offs?|migrat\w+|strategy|research|deep dive|in depth|compare)\b/i;
+  const TOOL_KINDS = new Set(['github', 'jira', 'slack', 'email', 'calendar', 'files', 'writing']);
+  const MODEL = { simple: ['Haiku', 'H'], standard: ['Sonnet', 'S'], complex: ['Opus', 'O'] };
+
+  function classify(t) { const l = t.toLowerCase(); for (const [k, re] of RULES) if (re.test(l)) return k; return 'chat'; }
+  function route(text) {
+    const kind = classify(text);
+    const words = (text.match(/\S+/g) || []).length;
+    const complex = COMPLEX.test(text), task = TASK_VERBS.test(text);
+    let tier, reason, sure = true;
+    if ((kind === 'code' || kind === 'planning') && (complex || words > 25)) { tier = 'complex'; reason = kind + ' with multi-step or deep work'; }
+    else if (complex && task) { tier = 'complex'; reason = 'multi-step task'; sure = words > 12; }
+    else if (words > 60) { tier = 'complex'; reason = 'long request'; sure = false; }
+    else if (kind === 'code' || kind === 'planning') { tier = 'standard'; reason = kind + ' request'; sure = false; }
+    else if (TOOL_KINDS.has(kind)) { tier = 'standard'; reason = kind + ' needs a service tool'; }
+    else if (words < 6 && !task) { tier = 'simple'; reason = 'short chat'; }
+    else { tier = 'simple'; reason = kind + ': small model first'; }
+    const speed = tier === 'simple' ? 'instant' : 'normal';
+    return { kind, tier, speed, reason, sure };
+  }
+
+  /* ---------- Tool icons the pet holds ---------- */
+  const ICONS = {
+    jira: '<rect x="-12" y="-12" width="24" height="24" rx="6" fill="var(--accent)"/><path d="M-5 -4 h10 M-5 1 h10 M-5 6 h6" stroke="var(--accent-ink)" stroke-width="2" stroke-linecap="round"/>',
+    slack: '<rect x="-12" y="-12" width="24" height="20" rx="7" fill="var(--glow)"/><path d="M-6 8 l-3 6 l8 -6" fill="var(--glow)"/><circle cx="-4" cy="-2" r="2" fill="var(--visor)"/><circle cx="4" cy="-2" r="2" fill="var(--visor)"/>',
+    web: '<circle r="12" fill="var(--glow)"/><path d="M-12 0 h24 M0 -12 c6 6 6 18 0 24 c-6 -6 -6 -18 0 -24" stroke="var(--visor)" stroke-width="1.6" fill="none"/>',
+    code: '<ellipse cx="0" cy="-7" rx="11" ry="4" fill="var(--ok)"/><path d="M-11 -7 v14 a11 4 0 0 0 22 0 v-14" fill="var(--ok)"/><ellipse cx="0" cy="0" rx="11" ry="4" fill="none" stroke="var(--visor)" stroke-width="1.2"/>',
+    github: '<circle r="12" fill="var(--ink)"/><path d="M-4 -3 v8 M4 -3 v8 M-4 1 h8" stroke="var(--panel)" stroke-width="2" stroke-linecap="round"/>',
+  };
+
+  /* ---------- State + events ---------- */
+  let timers = [];
+  let levelTimer = null;
+  const later = (ms, fn) => { const t = setTimeout(fn, reduced ? Math.min(ms, 300) : ms); timers.push(t); return t; };
+  function clearAll() { timers.forEach(clearTimeout); timers = []; stopLevels(); }
+
+  function log(type, detail) {
+    const li = document.createElement('li');
+    const now = new Date();
+    li.innerHTML = '<time>' + now.toLocaleTimeString([], { minute: '2-digit', second: '2-digit' }) + '</time><span></span>';
+    li.lastChild.textContent = detail ? type + ' ' + detail : type;
+    logEl.prepend(li);
+    while (logEl.children.length > 40) logEl.lastChild.remove();
+  }
+
+  function setPressed(state) {
+    document.querySelectorAll('#states [data-state]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.state === state)));
+  }
+
+  function setState(state, opts = {}) {
+    const tool = state === 'TOOL';
+    const real = tool ? 'THINKING' : state;
+    pet.dataset.state = real;
+    pet.dataset.tool = tool || opts.tool ? 'on' : 'off';
+    if (tool || opts.tool) held.innerHTML = ICONS[opts.tool || 'jira'] || ICONS.jira;
+    stage.classList.toggle('rec', real === 'LISTENING' || real === 'FOLLOW_UP');
+    setPressed(state);
+    approveRow.classList.toggle('on', real === 'AWAITING_APPROVAL');
+    stopLevels();
+    if (real === 'LISTENING') startLevels('mic');
+    if (real === 'SPEAKING') startLevels('speak');
+    if (real !== 'SPEAKING' && real !== 'AWAITING_APPROVAL' && !opts.keepBubble) hideBubble(real === 'SLEEPING' ? 0 : 6000);
+    log('state', real + (tool || opts.tool ? ' + tool_start(' + (opts.tool || 'jira') + ')' : ''));
+  }
+
+  function startLevels(kind) {
+    let t = 0;
+    levelTimer = setInterval(() => {
+      t += 1;
+      const lvl = kind === 'mic' ? 0.25 + Math.abs(Math.sin(t * 0.7)) * 0.5 + Math.random() * 0.25 : 0.15 + Math.random() * 0.85;
+      if (kind === 'mic') ring.style.transform = 'scale(' + (1 + lvl * 0.12) + ')';
+      else mouth.style.transform = 'scaleY(' + (1 + lvl * 2.6) + ')';
+    }, 90);
+  }
+  function stopLevels() { clearInterval(levelTimer); levelTimer = null; ring.style.transform = ''; mouth.style.transform = ''; }
+
+  let hideTimer = null;
+  function showBubble(who, text, { badge, say, approval } = {}) {
+    clearTimeout(hideTimer);
+    bubbleWho.textContent = who;
+    bubbleText.textContent = text;
+    bubbleBadge.hidden = !badge; if (badge) bubbleBadge.textContent = badge;
+    bubbleSay.hidden = !say; if (say) bubbleSay.innerHTML = say;
+    bubble.classList.toggle('approval', !!approval);
+    bubble.classList.remove('hidden');
+  }
+  function hideBubble(after = 6000) { clearTimeout(hideTimer); hideTimer = setTimeout(() => bubble.classList.add('hidden'), after); }
+
+  function typeOut(text, done) {
+    bubbleText.textContent = '';
+    let i = 0;
+    const step = () => { bubbleText.textContent = text.slice(0, ++i); if (i < text.length) later(reduced ? 0 : 28, step); else done && done(); };
+    step();
+  }
+
+  /* ---------- A request, end to end ---------- */
+  let pendingApproval = null;
+
+  function runRequest(text) {
+    clearAll();
+    const r = route(text);
+    const [name, letter] = MODEL[r.tier];
+    routeBox.innerHTML = 'kind=<b>' + r.kind + '</b> model=<b>' + name + '</b> speed=<b>' + r.speed + '</b><br>why: ' + r.reason + (r.sure ? '' : ' · unsure, the Haiku classifier double-checks');
+    log('wake_word', 'Hi Jarvis');
+    setState('LISTENING');
+    showBubble('You', '…');
+    later(700, () => typeOut(text));
+    later(700 + text.length * 28 + 400, () => {
+      log('transcript_final', '"' + text + '"');
+      modelTag.textContent = letter;
+      log('model_selected', name + ' / ' + r.speed);
+      setState('THINKING', { keepBubble: true });
+
+      const lower = text.toLowerCase();
+      const destructive = /\b(delete|remove|drop|force)\b/.test(lower);
+      const changes = destructive || /\b(move|create|send|post|tell|comment|commit|assign)\b/.test(lower);
+      const tool = r.kind === 'jira' ? 'jira' : r.kind === 'slack' ? 'slack' : r.kind === 'github' ? 'github' : r.kind === 'code' && /mongo|query/.test(lower) ? 'code' : r.kind === 'web' ? 'web' : null;
+
+      if (r.tier === 'simple' && !tool) {
+        later(900, () => speak('It is 3:40 in the morning in Tokyo, on Sunday.', name));
+        return;
+      }
+      later(900, () => {
+        if (tool) setState('THINKING', { tool, keepBubble: true });
+        if (tool) log('tool_start', tool);
+        later(1300, () => {
+          if (tool) log('tool_end', tool + ' ok');
+          if (changes) return askApproval(text, destructive, name);
+          speak(r.kind === 'code'
+            ? 'The orders query scans every document. An index on customer and created date should fix it. Want me to draft it?'
+            : 'The login service waits on the token check, which retries three times with no timeout. That is the root cause. Want the details?', name);
+        });
+      });
+    });
+  }
+
+  function askApproval(text, destructive, model) {
+    const code = String(Math.floor(Math.random() * 90) + 10).split('').join(' ');
+    const sentence = destructive
+      ? 'This will delete the branch feature-login. To confirm, say:'
+      : "I'm about to move PROJ-142 to In Review and post in #team: “PROJ-142 is ready for review.” Approve or cancel?";
+    setState('AWAITING_APPROVAL');
+    log('approval_request', destructive ? 'tier 3, code ' + code.replace(' ', '') : 'tier 2');
+    showBubble('Needs your OK', sentence, {
+      badge: destructive ? 'tier 3' : 'tier 2',
+      say: destructive ? '✋ Say <span class="code">confirm ' + code + '</span>' : '✋ Say <b>approve</b> or <b>cancel</b>',
+      approval: true,
+    });
+    pendingApproval = { destructive, model };
+    later(20000, () => { if (pendingApproval) answer(false, 'timeout'); });
+  }
+
+  function answer(ok, why) {
+    if (!pendingApproval) return;
+    const { model } = pendingApproval;
+    pendingApproval = null;
+    log('approval_result', ok ? 'approved' : 'cancelled' + (why ? ' (' + why + ')' : ''));
+    if (!ok) { speak(why === 'timeout' ? 'No answer, so I cancelled it.' : 'Okay, cancelled. Nothing was changed.', model); return; }
+    setState('THINKING', { tool: 'jira', keepBubble: true });
+    later(1100, () => speak('Done. PROJ-142 is in review and the team has been told.', model));
+  }
+
+  function speak(text, model) {
+    setState('SPEAKING');
+    log('reply_text', '"' + text.slice(0, 40) + (text.length > 40 ? '…"' : '"'));
+    showBubble('Jarvis', '', { badge: model });
+    typeOut(text, () => later(500, () => {
+      setState('FOLLOW_UP', { keepBubble: true });
+      hideBubble(6000);
+      later(8000, () => setState('SLEEPING'));
+    }));
+  }
+
+  /* ---------- Wire up ---------- */
+  document.getElementById('askForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const input = document.getElementById('askInput');
+    const text = input.value.trim().replace(/^(hi |hey )?jarvis[,.]?\s*/i, '') || 'move PROJ-142 to In Review';
+    runRequest(text);
+    input.value = '';
+  });
+  document.querySelectorAll('[data-ask]').forEach((b) => b.addEventListener('click', () => runRequest(b.dataset.ask)));
+  document.getElementById('approveBtn').addEventListener('click', () => answer(true));
+  document.getElementById('cancelBtn').addEventListener('click', () => answer(false));
+  document.getElementById('demoBtn').addEventListener('click', () => runRequest('move PROJ-142 to In Review and tell the team on slack'));
+  document.getElementById('stopBtn').addEventListener('click', () => {
+    clearAll(); pendingApproval = null; log('stop', 'voice'); bubble.classList.add('hidden'); setState('SLEEPING');
+  });
+  document.querySelectorAll('#states [data-state]').forEach((b) => b.addEventListener('click', () => {
+    clearAll(); pendingApproval = null;
+    const s = b.dataset.state;
+    if (s === 'AWAITING_APPROVAL') { askApproval('', false, 'Sonnet'); return; }
+    if (s === 'ERROR') { setState('ERROR'); showBubble('Jarvis', 'Sorry, Jira did not answer. Try again in a moment.'); later(1800, () => setState('SLEEPING')); return; }
+    if (s === 'SPEAKING') { speak('There are 12 open tickets in your sprint. Want the top three?', 'Sonnet'); return; }
+    if (s === 'THINKING') modelTag.textContent = 'S';
+    setState(s, s === 'TOOL' ? { tool: 'jira' } : {});
+  }));
+  const budgetBtn = document.getElementById('budgetBtn');
+  budgetBtn.addEventListener('click', () => {
+    const on = pet.dataset.budget !== 'warn';
+    pet.dataset.budget = on ? 'warn' : 'ok';
+    budgetBtn.setAttribute('aria-pressed', String(on));
+    log('budget', on ? '80% of daily budget' : 'reset');
+  });
+
+  /* Drag the pet, as on the desktop. */
+  let drag = null;
+  pet.addEventListener('pointerdown', (e) => {
+    const r = pet.getBoundingClientRect(), s = stage.getBoundingClientRect();
+    drag = { dx: e.clientX - r.left, dy: e.clientY - r.top, s };
+    pet.setPointerCapture(e.pointerId); pet.style.cursor = 'grabbing';
+  });
+  pet.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const { s } = drag;
+    const x = Math.min(Math.max(e.clientX - s.left - drag.dx, 0), s.width - 160);
+    const y = Math.min(Math.max(e.clientY - s.top - drag.dy, 0), s.height - 206);
+    pet.style.left = x + 'px'; pet.style.top = y + 'px'; pet.style.right = 'auto'; pet.style.bottom = 'auto';
+    bubble.style.right = Math.max(8, s.width - x - 160) + 'px';
+    bubble.style.bottom = Math.max(8, s.height - y + 6) + 'px';
+  });
+  pet.addEventListener('pointerup', () => { drag = null; pet.style.cursor = 'grab'; });
+
+  const clock = document.getElementById('clock');
+  const tick = () => { clock.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); };
+  tick(); setInterval(tick, 30000);
+
+  setState('SLEEPING');
+  routeBox.textContent = 'Type a request or pick an example. The router starts on Haiku and moves up only when the task needs it.';
+})();
+</script>
