@@ -11,6 +11,7 @@ import {
 } from '../memory/index.ts';
 import { readSecret } from '../secrets/index.ts';
 import { defaultSkillRoots, discoverSkills } from '../skills/index.ts';
+import { ReplyModelClassifier } from './classifier-model.ts';
 import { ClaudeCliReplyModel, findClaudeExe } from './claude-cli.ts';
 import { ClaudeReplyModel, Conversation, type ReplyModel } from './conversation.ts';
 
@@ -20,6 +21,8 @@ export interface OpenedConversation {
   conversation: Conversation;
   learner: Learner;
   model: ReplyModel;
+  /** Closes the model processes (conversation and classifier). */
+  close(): Promise<void>;
   /** Who answers, for the startup line. */
   brain: string;
   memory: string;
@@ -37,6 +40,7 @@ export async function openConversation(
 ): Promise<OpenedConversation> {
   const { jarvis } = config;
   let model: ReplyModel;
+  let classifierModel: ReplyModel;
   let brain: string;
   let files: MemoryFiles;
   let memory: string;
@@ -53,6 +57,12 @@ export async function openConversation(
       workDir: path.join(jarvis.dataDir, 'cli'),
       idleStopMs: jarvis.brain.idleStopSeconds * 1000,
     });
+    // Its own process, so classifying never mixes into the conversation.
+    classifierModel = new ClaudeCliReplyModel({
+      exe,
+      workDir: path.join(jarvis.dataDir, 'cli-classifier'),
+      idleStopMs: jarvis.brain.idleStopSeconds * 1000,
+    });
     brain = 'your Claude subscription (Claude CLI)';
     // The Claude Memory Store needs an API key, so memory stays in one small file here.
     files = options.local
@@ -66,6 +76,7 @@ export async function openConversation(
     }
     const client = new Anthropic({ apiKey });
     model = new ClaudeReplyModel(client);
+    classifierModel = model; // the API keeps no state between calls
     brain = 'Anthropic API';
     if (options.local) {
       files = new InMemoryFiles();
@@ -98,6 +109,13 @@ export async function openConversation(
     skills,
     maxSkills: jarvis.skills.maxPerRequest,
     toolTier: (name) => config.permissions.tools[name] ?? 2,
+    classifier: jarvis.routing.classifier
+      ? new ReplyModelClassifier(classifierModel, config.models.classifier)
+      : undefined,
+    classifierTimeoutMs: jarvis.routing.classifierTimeoutSeconds * 1000,
   });
-  return { conversation, learner, model, brain, memory, skillCount: skills.length };
+  const close = async () => {
+    await Promise.allSettled([model.close?.(), classifierModel.close?.()]);
+  };
+  return { conversation, learner, model, close, brain, memory, skillCount: skills.length };
 }

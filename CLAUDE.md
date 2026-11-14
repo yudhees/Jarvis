@@ -540,6 +540,21 @@ Needed by phase 4 / 6:
 
 **Phase 0: done (awaiting user sign-off).** **Phase 1: built and unit-tested.** Claude replies work live through the Claude CLI on the user's subscription (`npm run repl`): about 1.8 s to the first answer from cold, and Sonnet when forced about 3.7 s. The wake word uses Windows' own recognizer, so no key or account is needed. `npm start` runs end to end; it has not been tried by voice yet.
 
+**Phase 2: router, done (awaiting user sign-off).** `tests/router.samples.json` routes 30 of 30 requests to the right tier and speed (27 needed). The test also proves rule-decided requests never call the classifier.
+- **Jira issue keys:** a key like PROJ-142 (upper case) makes a request a Jira one.
+- **Haiku classifier (rule 4)** (router/classifier.ts, voice/classifier-model.ts):
+  - It runs only when the code estimate is unsure, may raise the tier but never lower it, and the estimate stands if it's slower than `routing.classifierTimeoutSeconds` (1.5 s) or answers badly.
+  - A slow answer isn't cancelled, so the classifier stays warm for the next request. It has its own Claude process, separate from the conversation.
+  - **Off by default:** through the Claude CLI it took 1.7–4 s per answer, so it never made the 1.5 s limit and would only cost a second process. Turn it on with `brain.provider: api`. `[[ESCALATE]]` still covers hard requests.
+- **Latency budget per speed (7.1 rule 2):** each request records whether it missed its first-word budget (instant 2 s, normal 6 s). The "Still working on it" filler stays at the normal budget, because CLI answers usually start at about 2–2.5 s and a 2 s filler would talk over most of them.
+- **Routing log (rule 7, 7.1 rule 6):** `%APPDATA%/jarvis/routing/YYYY-MM-DD.jsonl`, one line per answered request:
+  - kind, word count, tier, speed, model, which rule decided, classifier result;
+  - escalations, speech-to-text time, first word, total time, budget and miss, tokens, lookups;
+  - no transcript text. Days older than `routing.logDays` (30) are deleted.
+- **Not done:**
+  - whether the user corrected the choice (7.1 rule 6) is not logged yet;
+  - `background` speed doesn't free the voice loop yet (needs the scheduler, phase 6).
+
 Phase 1 (`npm start`, `npm run repl`):
 - `VoiceLoop` (core/src/voice/loop.ts): one mic stream feeds everything. Porcupine hears every frame, even while Jarvis is thinking or speaking, so "Jarvis" or the stop keyword always interrupts. States follow section 6 through `StateMachine` (state/machine.ts). Speech-to-text never runs on Jarvis's own voice.
 - `Endpointer` (audio/endpointer.ts): an energy check against the room's noise floor, measured while asleep (`NoiseFloor`). 800 ms of quiet ends the request; no speech within 5 s of the wake word sends Jarvis back to sleep; recordings stop at 15 s. Proper VAD is phase 5.

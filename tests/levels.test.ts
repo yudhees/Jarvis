@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { meterBar, rmsLevel, SILENCE_DBFS, toDbfs } from '@jarvis/core/audio';
+import { meterBar, rmsLevel, SILENCE_DBFS, toDbfs, voicing } from '@jarvis/core/audio';
 
 describe('rmsLevel', () => {
   it('is 0 for silence and empty ranges', () => {
@@ -32,5 +32,23 @@ describe('meterBar', () => {
   it('is empty at -60 dBFS and full at 0', () => {
     assert.ok(meterBar(-60, 10).startsWith('[..........]'));
     assert.ok(meterBar(0, 10).startsWith('[##########]'));
+  });
+});
+
+describe('voicing', () => {
+  it('is high for a pitched sound and low for noise or silence', () => {
+    // A 150 Hz voice-like tone with a few harmonics.
+    const tone = Int16Array.from({ length: 512 }, (_, i) => {
+      const t = (2 * Math.PI * 150 * i) / 16000;
+      return Math.round(6000 * (Math.sin(t) + 0.5 * Math.sin(2 * t) + 0.3 * Math.sin(3 * t)));
+    });
+    assert.ok(voicing(tone, 16000) > 0.8, 'tone');
+    let seed = 5;
+    const hiss = Int16Array.from({ length: 512 }, () => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      return Math.round((seed / 2 ** 32 - 0.5) * 12000);
+    });
+    assert.ok(voicing(hiss, 16000) < 0.35, `hiss ${voicing(hiss, 16000)}`);
+    assert.equal(voicing(new Int16Array(512), 16000), 0);
   });
 });

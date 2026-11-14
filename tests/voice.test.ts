@@ -750,7 +750,7 @@ describe('talking while Jarvis is busy', () => {
 });
 
 describe('BargeIn', () => {
-  const opts = { frameMs: 32, minSpeechMs: 280 };
+  const opts = { frameMs: 32, sampleRate: RATE, minSpeechMs: 280 };
   it('needs a moment of real speech, not a click', () => {
     const b = new BargeIn(opts);
     assert.equal(b.push(SPEECH, 0, -70), false);
@@ -767,6 +767,53 @@ describe('BargeIn', () => {
     let hit = false;
     for (let i = 0; i < 9; i++) hit = b.push(frame(-8), out, -70);
     assert.equal(hit, true, 'the user, 22 dB above the echo');
+  });
+
+  // A small seeded generator, so the noise is the same every run.
+  const rng = (seed: number) => () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 2 ** 32 - 0.5;
+  };
+  const noise = (dbfs: number, next: () => number): Int16Array => {
+    const amp = 32767 * 10 ** (dbfs / 20) * Math.sqrt(12);
+    return Int16Array.from({ length: FRAME }, () => Math.round(amp * next()));
+  };
+
+  it('ignores loud noise that has no pitch (a fan burst, rustling, a chair)', () => {
+    const b = new BargeIn(opts);
+    const next = rng(7);
+    for (let i = 0; i < 60; i++)
+      assert.equal(b.push(noise(-25, next), 0, -70), false, `frame ${i}`);
+  });
+
+  it('ignores knocks and typing (short clicks)', () => {
+    const b = new BargeIn(opts);
+    const next = rng(3);
+    for (let i = 0; i < 60; i++) {
+      const f = noise(-70, next);
+      // A sharp click that dies away within a few milliseconds.
+      for (let j = 0; j < 80; j++) f[100 + j] = Math.round(20000 * Math.exp(-j / 12) * next() * 2);
+      assert.equal(b.push(f, 0, -70), false, `frame ${i}`);
+    }
+  });
+
+  it('still hears a voice with short gaps between words', () => {
+    const b = new BargeIn(opts);
+    const next = rng(11);
+    const pattern = [
+      SPEECH,
+      SPEECH,
+      SPEECH,
+      noise(-30, next),
+      SPEECH,
+      SPEECH,
+      QUIET,
+      SPEECH,
+      SPEECH,
+    ];
+    let hit = false;
+    for (const f of [...pattern, ...pattern]) hit ||= b.push(f, 0, -70);
+    assert.equal(hit, true);
   });
 });
 

@@ -16,7 +16,7 @@ export interface RouteInput {
   learned?: ReadonlyMap<RequestKind, LearnedRouting>;
 }
 
-export type DecidedBy = 'forced' | 'follow_up' | 'learned' | 'estimate';
+export type DecidedBy = 'forced' | 'follow_up' | 'learned' | 'estimate' | 'classifier';
 
 export interface RouteDecision {
   kind: RequestKind;

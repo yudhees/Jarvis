@@ -1,0 +1,76 @@
+[
+  { "text": "what's two plus two", "tier": "simple", "speed": "instant" },
+  { "text": "what time is it", "tier": "simple", "speed": "instant" },
+  { "text": "tell me a joke", "tier": "simple", "speed": "instant" },
+  { "text": "how are you today", "tier": "simple", "speed": "instant" },
+  { "text": "what's the weather in London", "tier": "simple", "speed": "instant" },
+  { "text": "set the volume to 30 percent", "tier": "simple", "speed": "instant" },
+  { "text": "open Spotify", "tier": "simple", "speed": "instant" },
+  { "text": "what's 15 percent of 240", "tier": "simple", "speed": "instant" },
+  { "text": "quickly, what's the capital of Australia", "tier": "simple", "speed": "instant" },
+  {
+    "text": "just tell me quickly, is it going to rain today",
+    "tier": "simple",
+    "speed": "instant"
+  },
+  { "text": "thanks, that's great", "tier": "simple", "speed": "instant" },
+  { "text": "summarize my unread Slack messages", "tier": "standard", "speed": "normal" },
+  {
+    "text": "create a Jira ticket for the login timeout bug",
+    "tier": "standard",
+    "speed": "normal"
+  },
+  { "text": "move PROJ-142 to In Review", "tier": "standard", "speed": "normal" },
+  {
+    "text": "send a message to Priya on Slack saying I'm running late",
+    "tier": "standard",
+    "speed": "normal"
+  },
+  { "text": "check my email for anything from the bank", "tier": "standard", "speed": "normal" },
+  { "text": "what meetings do I have tomorrow", "tier": "standard", "speed": "normal" },
+  { "text": "what's on my calendar this afternoon", "tier": "standard", "speed": "normal" },
+  { "text": "find the PDF I downloaded yesterday", "tier": "standard", "speed": "normal" },
+  { "text": "draft a reply to the last email from Sam", "tier": "standard", "speed": "normal" },
+  { "text": "list my open pull requests on GitHub", "tier": "standard", "speed": "normal" },
+  {
+    "text": "write a function that reverses a string in Python",
+    "tier": "standard",
+    "speed": "normal"
+  },
+  { "text": "why does this regex not match dates", "tier": "standard", "speed": "normal" },
+  {
+    "text": "find the root cause of the memory leak in the payment service and fix it step by step",
+    "tier": "complex",
+    "speed": "normal"
+  },
+  {
+    "text": "review the PR for the auth refactor and list the trade-offs",
+    "tier": "complex",
+    "speed": "normal"
+  },
+  {
+    "text": "plan the migration of our database from MySQL to Postgres",
+    "tier": "complex",
+    "speed": "normal"
+  },
+  {
+    "text": "design the architecture for a notification service with retries and dead letter queues",
+    "tier": "complex",
+    "speed": "normal"
+  },
+  {
+    "text": "explain step by step how to set up a GitHub action that deploys to AWS and rolls back on failure",
+    "tier": "complex",
+    "speed": "normal"
+  },
+  {
+    "text": "take your time and research the best vector databases for our use case",
+    "tier": "complex",
+    "speed": "background"
+  },
+  {
+    "text": "in the background, compare three laptops under 1000 dollars for programming",
+    "tier": "complex",
+    "speed": "background"
+  }
+]

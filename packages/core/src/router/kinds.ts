@@ -48,7 +48,11 @@ const RULES: [Exclude<RequestKind, 'chat'>, RegExp][] = [
   ['math', /\b(calculate|plus|minus|times|divided|percent|square root)\b|\d+\s*[-+*/x]\s*\d+/],
 ];
 
+/** A Jira issue key like PROJ-142 (upper case, so "utf-8" or "covid-19" don't count). */
+const ISSUE_KEY = /\b[A-Z][A-Z0-9]{1,9}-\d+\b/;
+
 export function classifyKind(text: string): RequestKind {
+  if (ISSUE_KEY.test(text) && !/\b(github|pull request|pr)\b/i.test(text)) return 'jira';
   const lower = text.toLowerCase();
   for (const [kind, re] of RULES) if (re.test(lower)) return kind;
   return 'chat';

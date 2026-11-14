@@ -20,9 +20,11 @@ import {
 import { PetBridge, PetProcess, stopOrphanedHelpers } from './bridge/index.ts';
 import { defaultConfigDir, LIVE_SETTINGS, loadConfig, watchJarvisConfig } from './config/index.ts';
 import { WindowsHotkeys } from './hotkey/index.ts';
+import { RequestLog } from './router/index.ts';
 import { readSecret } from './secrets/index.ts';
 import { resolveWhisper, WhisperCppStt } from './stt/index.ts';
 import { WindowsSapiTts } from './tts/index.ts';
+import { UsageLog } from './usage/index.ts';
 import { type TurnLog, VoiceLoop, WAKE_HINT } from './voice/index.ts';
 import { MissingKeyError, openConversation } from './voice/open.ts';
 
@@ -144,7 +146,45 @@ function show(event: CoreToPetEvent): void {
   }
 }
 
+// Daily totals for the Settings window's Usage tab (numbers only, kept 30 days).
+const usage = new UsageLog(jarvis.dataDir, jarvis.retention.transcriptDays);
+usage.prune();
+
+const requestLog = new RequestLog(path.join(jarvis.dataDir, 'routing'), jarvis.routing.logDays);
+
+/** One line per answered request in the routing log (no transcript in it). */
+function recordTurn(t: TurnLog): void {
+  const r = t.result;
+  if (!r?.decision || !r.tier || !r.model) return;
+  requestLog.write({
+    at: new Date().toISOString(),
+    kind: r.decision.kind,
+    words: (t.heard.match(/S+/g) ?? []).length,
+    tier: r.tier,
+    speed: r.decision.speed,
+    model: r.model,
+    decidedBy: r.decision.decidedBy,
+    classifier: r.classifier && {
+      tier: r.classifier.classification?.tier ?? null,
+      raised: r.classifier.raised,
+      ms: Math.round(r.classifier.ms),
+    },
+    escalations: r.escalations,
+    sttMs: Math.round(t.sttMs),
+    firstWordMs: t.firstAudioMs === null ? null : Math.round(t.firstAudioMs),
+    totalMs: Math.round(t.totalMs),
+    latencyBudgetMs: t.latencyBudgetMs ?? 0,
+    latencyMiss: t.latencyMiss ?? false,
+    inputTokens: r.usage.inputTokens,
+    outputTokens: r.usage.outputTokens,
+    lookups: r.usage.toolCalls,
+    stopped: t.stopped,
+  });
+}
+
 function logTurn(t: TurnLog): void {
+  recordTurn(t);
+  usage.record(t);
   const ms = (n: number | null) => (n === null ? '-' : `${Math.round(n)} ms`);
   const r = t.result;
   const parts = [
@@ -154,6 +194,11 @@ function logTurn(t: TurnLog): void {
   ];
   if (r?.decision) parts.push(`${r.decision.kind}, decided by ${r.decision.decidedBy}`);
   if (r?.escalations) parts.push(`escalated ${r.escalations}x`);
+  if (r?.classifier) {
+    const said = r.classifier.classification?.tier ?? 'too slow';
+    parts.push(`classifier: ${said} in ${Math.round(r.classifier.ms)} ms`);
+  }
+  if (t.latencyMiss) parts.push(`over the ${(t.latencyBudgetMs ?? 0) / 1000} s budget`);
   if (r?.usage.inputTokens) parts.push(`${r.usage.inputTokens}+${r.usage.outputTokens} tokens`);
   if (t.command) parts.push(`command: ${t.command}`);
   if (t.stopped) parts.push('stopped');
@@ -210,6 +255,7 @@ const timing = {
   maxRecordMs: jarvis.listening.maxRecordSeconds * 1000,
   followUpMs: jarvis.listening.followUpSeconds * 1000,
   fillerMs: jarvis.latency.normalSeconds * 1000,
+  instantMs: jarvis.latency.instantSeconds * 1000,
   bargeIn: jarvis.listening.bargeIn,
 };
 const loop = new VoiceLoop({
@@ -284,7 +330,7 @@ try {
   if (!petAskedToQuit) pet?.stop();
   await bridge.close();
   keywords?.release();
-  await Promise.allSettled([stt.close(), tts.close(), opened.model.close?.()]);
+  await Promise.allSettled([stt.close(), tts.close(), opened.close()]);
   console.log('Bye.');
   if (process.connected) process.disconnect?.(); // the supervisor's channel would keep us alive
 }

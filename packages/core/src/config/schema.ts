@@ -127,6 +127,14 @@ export const jarvisSchema = z.strictObject({
     port: z.int().min(1024).max(65535),
     idleStopSeconds: z.int().min(0).max(86400),
   }),
+  routing: z.strictObject({
+    /** Ask Haiku about requests the code estimate is unsure of (CLAUDE.md 7 rule 4). */
+    classifier: z.boolean(),
+    /** Slower than this, and the estimate stands. */
+    classifierTimeoutSeconds: z.number().min(0.2).max(10),
+    /** Keep the per-request routing log this many days (no transcripts in it). */
+    logDays: z.int().min(1).max(365),
+  }),
   learning: z.strictObject({
     enabled: z.boolean(),
     aboutUserTokenCap: positiveInt,

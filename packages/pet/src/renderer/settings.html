@@ -21,12 +21,16 @@
         <div class="status" id="status"><span class="dot"></span><span id="statusText">Checking…</span></div>
       </div>
     </div>
-    <button type="button" class="btn power" id="power" disabled>Start Jarvis</button>
+    <div class="power-row">
+      <button type="button" class="btn power" id="power" disabled>Start Jarvis</button>
+      <button type="button" class="btn restart" id="restart" hidden title="Stop Jarvis and start it again">Restart</button>
+    </div>
     <div class="nav" role="tablist" aria-label="Settings sections" aria-orientation="vertical">
       <button type="button" role="tab" id="tab-appearance" aria-controls="appearance" aria-selected="true">Appearance</button>
       <button type="button" role="tab" id="tab-voice" aria-controls="voice" aria-selected="false" tabindex="-1">Voice</button>
       <button type="button" role="tab" id="tab-listening" aria-controls="listening" aria-selected="false" tabindex="-1">Listening</button>
       <button type="button" role="tab" id="tab-behavior" aria-controls="behavior" aria-selected="false" tabindex="-1">Behavior</button>
+      <button type="button" role="tab" id="tab-usage" aria-controls="usage" aria-selected="false" tabindex="-1">Usage</button>
       <button type="button" role="tab" id="tab-about" aria-controls="about" aria-selected="false" tabindex="-1">About</button>
     </div>
     <p class="side-note">Changes save on their own and show on the pet right away.</p>
@@ -282,6 +286,42 @@
     </section>
 
     <!-- About -->
+    <!-- Usage -->
+    <section role="tabpanel" id="usage" aria-labelledby="tab-usage" hidden>
+      <header class="head head-row">
+        <div>
+          <h1>Usage</h1>
+          <p>Requests and tokens Jarvis used on this PC.</p>
+        </div>
+        <div class="seg" role="radiogroup" aria-label="Period">
+          <label><input type="radio" name="period" value="1"><span>Today</span></label>
+          <label><input type="radio" name="period" value="7" checked><span>7 days</span></label>
+          <label><input type="radio" name="period" value="30"><span>30 days</span></label>
+        </div>
+      </header>
+
+      <div class="tiles">
+        <div class="tile"><span class="t-label">Requests</span><span class="t-value" id="uRequests">0</span><span class="t-sub" id="uCommands"></span></div>
+        <div class="tile"><span class="t-label">Tokens</span><span class="t-value" id="uTokens">0</span><span class="t-sub" id="uTokensSplit"></span></div>
+        <div class="tile"><span class="t-label">First word</span><span class="t-value" id="uFirstWord">–</span><span class="t-sub">average wait</span></div>
+        <div class="tile"><span class="t-label">Tool calls</span><span class="t-value" id="uTools">0</span><span class="t-sub" id="uEscalations"></span></div>
+      </div>
+
+      <div class="card" id="uChartCard">
+        <h2>Tokens per day</h2>
+        <div class="chart" id="uChart" role="img"></div>
+      </div>
+
+      <div class="card">
+        <h2>By model</h2>
+        <table class="by-model">
+          <thead><tr><th scope="col">Model</th><th scope="col">Requests</th><th scope="col">Tokens</th><th scope="col">Share</th></tr></thead>
+          <tbody id="uByModel"></tbody>
+        </table>
+      </div>
+      <p class="note">Jarvis runs on your Claude plan, so there is no bill here. Your plan's own usage limits are not visible to Jarvis. Only totals are kept, never what was said, and days older than 30 are deleted.</p>
+    </section>
+
     <section role="tabpanel" id="about" aria-labelledby="tab-about" hidden>
       <header class="head">
         <h1>About</h1>

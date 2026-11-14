@@ -11,12 +11,13 @@ audio:
 
 listening:
   maxRecordSeconds: 15
-  followUpSeconds: 8
+  followUpSeconds: 27
   silenceMs: 1000 # this much quiet ends what you are saying (pause longer and it answers)
   bargeIn: true # talk while Jarvis thinks or speaks: it stops and listens
   startTimeoutSeconds: 5 # after "Jarvis", give up if you say nothing
 
-keywords: # how Jarvis hears "Jarvis" (Ctrl+Alt+L always works too)
+keywords:
+  # how Jarvis hears "Jarvis" (Ctrl+Alt+L always works too)
   provider: whisper # whisper = checks speech with Whisper (best for most voices) | windows = built-in recognizer | picovoice | none = hotkey only
   minConfidence: 0.6 # windows: 0..1, higher = fewer false wakes, more misses
   gain: 1 # windows: boost a quiet mic before recognizing; tune with: npm run wake-test -- --gain 4
@@ -32,17 +33,19 @@ tasks:
   maxSeconds: 300
   maxIdenticalToolCalls: 3
 
-latency: # first spoken word budgets (section 7.1)
+latency:
+  # first spoken word budgets (section 7.1)
   instantSeconds: 2
   normalSeconds: 6
 
 voice:
   provider: windows-sapi
-  voice: null # null = Windows default, or e.g. "Microsoft Zira Desktop"
-  rate: 0 # -10 (slow) .. 10 (fast)
+  voice: Microsoft Zira Desktop # null = Windows default, or e.g. "Microsoft Zira Desktop"
+  rate: 2 # -10 (slow) .. 10 (fast)
   requestTimeoutSeconds: 30
 
-budget: # open decision (section 17); null = not set yet
+budget:
+  # open decision (section 17); null = not set yet
   dailyCostUsd: null
   dailyTokens: null
 
@@ -55,18 +58,25 @@ retention:
 pet:
   enabled: true # open the desktop pet with npm start (Jarvis works without it)
 
-brain: # who answers
+brain:
+  # who answers
   provider: claude-cli # your Claude subscription through Claude Code (no API key, no extra billing); or: api
   cliPath: null # null = find claude.exe (%USERPROFILE%/.local/bin, then PATH)
   idleStopSeconds: 60 # close the CLI after a minute without requests (frees ~200 MB)
 
-stt: # speech-to-text: turns what you say into text for Claude
+stt:
+  # speech-to-text: turns what you say into text for Claude
   provider: whisper-cpp # runs on this PC; install with: npm run setup-whisper
   model: ggml-base.en-q8_0.bin # bigger and more accurate: ggml-small.en-q5_1.bin
   language: en
   threads: 4
   port: 8178 # local whisper-server, bound to 127.0.0.1 only
   idleStopSeconds: 60 # unload the model after a minute of no speech (frees ~140 MB RAM); 0 = keep loaded
+
+routing: # how each request picks Haiku, Sonnet or Opus (CLAUDE.md 7)
+  classifier: false # ask Haiku when the rules are unsure. Off: through the Claude CLI it takes 1.7-4 s, over the 1.5 s limit, so it would only cost a second process; worth it with brain.provider: api
+  classifierTimeoutSeconds: 1.5 # slower than this and the rules' choice stands
+  logDays: 30 # per-request routing log in %APPDATA%/jarvis/routing (no transcripts)
 
 learning:
   enabled: true

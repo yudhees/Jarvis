@@ -508,9 +508,17 @@ input[type="text"]:hover {
   stroke-width: 5;
   stroke-linejoin: round;
 }
-.power {
+.power-row {
+  display: flex;
+  gap: 8px;
   margin: 0 6px;
+}
+.power {
+  flex: 1;
   font-weight: 600;
+}
+.restart {
+  flex: none;
 }
 .power.start {
   background: var(--accent);
@@ -618,6 +626,123 @@ input[type="text"]:hover {
   cursor: pointer;
 }
 
+/* Usage */
+.head-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+.head-row p {
+  margin-bottom: 0;
+}
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.tile {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.t-label {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.t-value {
+  font: 600 26px / 1.25 var(--display);
+  font-variant-numeric: tabular-nums;
+  margin: 2px 0;
+}
+.t-sub {
+  font-size: 12px;
+  color: var(--muted);
+  min-height: 18px;
+}
+.chart {
+  padding: 8px 0 14px;
+}
+.chart svg {
+  width: 100%;
+  height: 170px;
+  display: block;
+  overflow: visible;
+}
+.chart .bar {
+  fill: var(--accent);
+}
+.chart .bar:hover {
+  fill: color-mix(in srgb, var(--accent) 75%, var(--ink));
+}
+.chart .grid {
+  stroke: var(--line);
+}
+.chart text {
+  fill: var(--muted);
+  font: 11px var(--font);
+  font-variant-numeric: tabular-nums;
+}
+.chart-empty {
+  color: var(--muted);
+  font-size: 13px;
+  padding: 18px 0 22px;
+}
+.by-model {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.by-model th {
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  padding: 6px 0;
+}
+.by-model td {
+  border-top: 1px solid var(--line);
+  padding: 9px 0;
+}
+.by-model th:not(:first-child),
+.by-model td:not(:first-child) {
+  text-align: right;
+}
+.share {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.share-track {
+  width: 70px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+}
+.share-fill {
+  height: 100%;
+  background: var(--accent);
+}
+.model-letter {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  margin-right: 8px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font: 700 12px var(--mono);
+}
+
 /* About */
 .plain {
   list-style: none;
@@ -693,6 +818,9 @@ kbd {
   }
   .range input {
     width: 140px;
+  }
+  .tiles {
+    grid-template-columns: repeat(2, 1fr);
   }
   select,
   input[type="text"] {

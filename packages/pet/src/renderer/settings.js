@@ -51,6 +51,7 @@
     }
     if (focus) tab.focus();
     if (tab.id === 'tab-voice') loadVoices();
+    if (tab.id === 'tab-usage') loadUsage();
   }
   for (const t of tabs) {
     t.addEventListener('click', () => selectTab(t));
@@ -391,31 +392,182 @@
 
   $('openConfig').addEventListener('click', () => api.openConfigFolder());
 
+  // ---------- usage ----------
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  const MODEL_NAMES = [
+    ['simple', 'Haiku', 'H'],
+    ['standard', 'Sonnet', 'S'],
+    ['complex', 'Opus', 'O'],
+  ];
+  const fmt = new Intl.NumberFormat();
+  const compact = new Intl.NumberFormat(undefined, {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+  });
+  function svg(tag, attrs, text) {
+    const el = document.createElementNS(SVGNS, tag);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
+    if (text !== undefined) el.textContent = text;
+    return el;
+  }
+
+  async function loadUsage() {
+    const period = Number(document.querySelector('input[name="period"]:checked')?.value || 7);
+    let days = [];
+    try {
+      days = await api.usage(period);
+    } catch {
+      toast('Could not read usage.', true);
+      return;
+    }
+    const sum = (f) => days.reduce((n, d) => n + f(d), 0);
+    const requests = sum((d) => d.requests);
+    const input = sum((d) => d.inputTokens);
+    const output = sum((d) => d.outputTokens);
+    const words = sum((d) => d.firstWordCount);
+    const commands = sum((d) => d.commands);
+    const escalations = sum((d) => d.escalations);
+    $('uRequests').textContent = fmt.format(requests);
+    $('uCommands').textContent = commands ? `+ ${fmt.format(commands)} spoken commands` : '';
+    $('uTokens').textContent = compact.format(input + output);
+    $('uTokensSplit').textContent = `${compact.format(input)} in · ${compact.format(output)} out`;
+    $('uFirstWord').textContent = words
+      ? `${(sum((d) => d.firstWordMsTotal) / words / 1000).toFixed(1)} s`
+      : '–';
+    $('uTools').textContent = fmt.format(sum((d) => d.toolCalls));
+    $('uEscalations').textContent = escalations ? `${escalations} moved to a bigger model` : '';
+
+    // Chart (hidden for a single day)
+    $('uChartCard').hidden = days.length < 2;
+    drawChart(days);
+
+    // By model
+    const total = input + output || 1;
+    $('uByModel').replaceChildren(
+      ...MODEL_NAMES.map(([tier, name, letter]) => {
+        const t = sum((d) => d.byTier[tier].inputTokens + d.byTier[tier].outputTokens);
+        const tr = document.createElement('tr');
+        const c1 = document.createElement('td');
+        const badge = document.createElement('span');
+        badge.className = 'model-letter';
+        badge.textContent = letter;
+        c1.append(badge, name);
+        const c2 = document.createElement('td');
+        c2.textContent = fmt.format(sum((d) => d.byTier[tier].requests));
+        const c3 = document.createElement('td');
+        c3.textContent = fmt.format(t);
+        const c4 = document.createElement('td');
+        const share = document.createElement('span');
+        share.className = 'share';
+        const track = document.createElement('span');
+        track.className = 'share-track';
+        const fill = document.createElement('span');
+        fill.className = 'share-fill';
+        fill.style.width = `${Math.round((t / total) * 100)}%`;
+        track.append(fill);
+        share.append(track, `${Math.round((t / total) * 100)}%`);
+        c4.append(share);
+        tr.append(c1, c2, c3, c4);
+        return tr;
+      }),
+    );
+  }
+
+  function drawChart(days) {
+    const box = $('uChart');
+    const values = days.map((d) => d.inputTokens + d.outputTokens);
+    const max = Math.max(...values);
+    if (max === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'chart-empty';
+      empty.textContent = 'No requests in this period yet. Say "Jarvis" and ask something.';
+      box.replaceChildren(empty);
+      box.removeAttribute('aria-label');
+      return;
+    }
+    const W = 600;
+    const H = 170;
+    const left = 44;
+    const bottom = 22;
+    const plotH = H - bottom - 8;
+    const step = (W - left) / days.length;
+    const barW = Math.max(3, Math.min(28, step * 0.62));
+    const chart = svg('svg', { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: 'none' });
+    for (const f of [0, 0.5, 1]) {
+      const y = 8 + plotH * (1 - f);
+      chart.append(svg('line', { class: 'grid', x1: left, x2: W, y1: y, y2: y }));
+      chart.append(
+        svg('text', { x: left - 8, y: y + 4, 'text-anchor': 'end' }, compact.format(max * f)),
+      );
+    }
+    const labelEvery = days.length > 14 ? 5 : days.length > 7 ? 2 : 1;
+    days.forEach((d, i) => {
+      const h = values[i] > 0 ? Math.max(2, (values[i] / max) * plotH) : 0;
+      const x = left + i * step + (step - barW) / 2;
+      const bar = svg('rect', { class: 'bar', x, y: 8 + plotH - h, width: barW, height: h, rx: 3 });
+      bar.append(
+        svg('title', {}, `${d.date}: ${fmt.format(values[i])} tokens, ${d.requests} requests`),
+      );
+      chart.append(bar);
+      if (i % labelEvery === 0 || i === days.length - 1) {
+        const label = new Date(`${d.date}T12:00:00`).toLocaleDateString(undefined, {
+          month: 'short',
+          day: 'numeric',
+        });
+        chart.append(svg('text', { x: x + barW / 2, y: H - 4, 'text-anchor': 'middle' }, label));
+      }
+    });
+    box.replaceChildren(chart);
+    box.setAttribute(
+      'aria-label',
+      `Tokens per day, highest ${fmt.format(max)}, total ${fmt.format(values.reduce((a, b) => a + b, 0))}`,
+    );
+  }
+
+  for (const input of document.querySelectorAll('input[name="period"]')) {
+    input.addEventListener('change', loadUsage);
+  }
+
   // ---------- start and stop Jarvis ----------
-  const STATUS_TEXT = { running: 'Running', starting: 'Starting…', stopped: 'Not running' };
+  const STATUS_TEXT = {
+    running: 'Running',
+    starting: 'Starting…',
+    restarting: 'Restarting…',
+    stopped: 'Not running',
+  };
   function showStatus(status) {
     coreStatus = STATUS_TEXT[status] ? status : 'stopped';
     coreConnected = coreStatus === 'running';
     $('status').classList.toggle('up', coreConnected);
     $('statusText').textContent = STATUS_TEXT[coreStatus];
     const power = $('power');
-    power.disabled = coreStatus === 'starting';
+    const busy = coreStatus === 'starting' || coreStatus === 'restarting';
+    power.disabled = busy;
     power.textContent =
-      coreStatus === 'running'
-        ? 'Stop Jarvis'
-        : coreStatus === 'starting'
-          ? 'Starting…'
-          : 'Start Jarvis';
+      coreStatus === 'running' ? 'Stop Jarvis' : busy ? STATUS_TEXT[coreStatus] : 'Start Jarvis';
+    const restart = $('restart');
+    restart.hidden = coreStatus !== 'running';
+    restart.disabled = busy;
     power.classList.toggle('start', coreStatus === 'stopped');
     power.classList.toggle('stop', coreStatus === 'running');
   }
   let wasStarting = false;
   api.onStatus((status) => {
+    if (wasStarting && status === 'running' && restartAsked) {
+      restartAsked = false;
+      toast('Jarvis restarted.');
+    }
     if (wasStarting && status === 'stopped') {
       toast('Jarvis did not start. Run npm start in a terminal to see why.', true);
     }
-    wasStarting = status === 'starting';
+    wasStarting = status === 'starting' || status === 'restarting';
     showStatus(status);
+  });
+  let restartAsked = false;
+  $('restart').addEventListener('click', async () => {
+    restartAsked = true;
+    wasStarting = true;
+    showStatus(await api.restartCore());
   });
   $('power').addEventListener('click', async () => {
     if (coreStatus === 'running') {

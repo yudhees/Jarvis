@@ -94,4 +94,4 @@ for await (const raw of rl) {
 }
 rl.close();
 await tts?.close();
-await opened.model.close?.();
+await opened.close();

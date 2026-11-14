@@ -24,6 +24,8 @@ export interface VoiceLoopTiming {
   followUpMs: number;
   /** Say "Still working on it" if nothing has been spoken by then. */
   fillerMs: number;
+  /** First-word budget for instant requests (7.1 rule 2); fillerMs is the normal one. */
+  instantMs?: number;
   /** Stop and listen when the user talks while Jarvis thinks or speaks (default on). */
   bargeIn?: boolean;
 }
@@ -44,6 +46,9 @@ export interface TurnLog {
   result?: AskResult;
   command?: string;
   stopped: boolean;
+  /** The first-word budget for this request's speed, and whether it was missed. */
+  latencyBudgetMs?: number;
+  latencyMiss?: boolean;
 }
 
 export interface VoiceLoopDeps {
@@ -150,6 +155,7 @@ export class VoiceLoop {
     this.#d = deps;
     this.#barge = new BargeIn({
       frameMs: (deps.timing.frameLength / deps.timing.sampleRate) * 1000,
+      sampleRate: deps.timing.sampleRate,
       minSpeechMs: BARGE_IN_MS,
     });
     this.#sm = new StateMachine((state) => {
@@ -526,6 +532,12 @@ export class VoiceLoop {
       clearTimeout(filler);
       if (this.#task === task) this.#task = undefined;
       log.totalMs = performance.now() - t0;
+      const speed = log.result?.decision?.speed;
+      if (speed) {
+        const t = this.#d.timing;
+        log.latencyBudgetMs = speed === 'instant' ? (t.instantMs ?? t.fillerMs) : t.fillerMs;
+        log.latencyMiss = log.firstAudioMs === null || log.firstAudioMs > log.latencyBudgetMs;
+      }
       if (log.heard) this.#d.onTurn?.(log);
     }
   }

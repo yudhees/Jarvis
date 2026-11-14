@@ -279,10 +279,44 @@ function currentTrayIcon(isMuted: boolean): NativeImage {
 
 // ---------- starting and stopping Jarvis core (Settings window, tray) ----------
 
-type CoreStatus = 'running' | 'starting' | 'stopped';
+type CoreStatus = 'running' | 'starting' | 'restarting' | 'stopped';
 function coreStatus(): CoreStatus {
-  if (connected) return 'running';
+  if (connected && !restarting) return 'running';
+  if (restarting) return 'restarting';
   return coreStarting ? 'starting' : 'stopped';
+}
+
+/** Set while a restart is under way; gives up after RESTART_TIMEOUT_MS. */
+let restarting: NodeJS.Timeout | undefined;
+const RESTART_TIMEOUT_MS = 60000;
+
+function endRestart(): void {
+  clearTimeout(restarting);
+  restarting = undefined;
+  statusChanged();
+}
+
+/**
+ * Stops core cleanly, then starts it again once it is gone. The old core holds
+ * the one-Jarvis lock until it has closed its helpers, so a start that exits at
+ * once is retried every second until the restart times out.
+ */
+function restartCore(): void {
+  if (restarting || coreStarting) return;
+  if (!connected) {
+    startCore();
+    return;
+  }
+  restarting = setTimeout(endRestart, RESTART_TIMEOUT_MS);
+  stopCore();
+  statusChanged();
+}
+
+/** Called when the link to core drops during a restart. */
+function continueRestart(): void {
+  link?.stop(); // the old core is going away; the new one hands over its own address
+  link = undefined;
+  setTimeout(() => startCore({ retryWhileRestarting: true }), 1000);
 }
 
 function statusChanged(): void {
@@ -295,11 +329,15 @@ function statusChanged(): void {
  * then opens its own pet, which hands its address to this pet (one pet at a
  * time), so this pet connects to it.
  */
-function startCore(): void {
+function startCore(options: { retryWhileRestarting?: boolean } = {}): void {
   if (connected || coreStarting) return;
   const done = () => {
     clearTimeout(coreStarting);
     coreStarting = undefined;
+    if (options.retryWhileRestarting && restarting && !connected) {
+      setTimeout(() => startCore(options), 1000); // the old Jarvis is still closing
+      return;
+    }
     statusChanged();
   };
   coreStarting = setTimeout(done, CORE_START_TIMEOUT_MS);
@@ -483,13 +521,20 @@ function updateTray(): void {
         ? { label: 'Unmute', click: () => toCore({ type: 'unmute' }) }
         : { label: 'Mute', click: () => toCore({ type: 'mute' }) },
       { label: 'Stop current task', click: () => toCore({ type: 'stop' }) },
-      connected
-        ? { label: 'Stop Jarvis', click: stopCore }
-        : {
-            label: coreStarting ? 'Starting Jarvis…' : 'Start Jarvis',
-            enabled: !coreStarting,
-            click: startCore,
-          },
+      ...(restarting
+        ? [{ label: 'Restarting Jarvis…', enabled: false }]
+        : connected
+          ? [
+              { label: 'Restart Jarvis', click: restartCore },
+              { label: 'Stop Jarvis', click: stopCore },
+            ]
+          : [
+              {
+                label: coreStarting ? 'Starting Jarvis…' : 'Start Jarvis',
+                enabled: !coreStarting,
+                click: () => startCore(),
+              },
+            ]),
       { label: 'Play demo', enabled: !connected, click: playDemo },
       { type: 'separator' },
       petVisible
@@ -651,6 +696,7 @@ const settingsDeps: SettingsDeps = {
   coreStatus,
   startCore,
   stopCore,
+  restartCore,
   onOpenChange: (open) => {
     settingsOpen = open;
     if (open) manuallyHidden = false;
@@ -682,11 +728,20 @@ function connectCore(core: { port: number; token: string }): void {
     ...core,
     onEvent: show,
     onStatus: (up) => {
+      const wasConnected = connected;
       connected = up;
       if (up) {
         stopDemo?.();
         clearTimeout(coreStarting);
         coreStarting = undefined;
+        // A new core connected: the restart is done. (The old link never
+        // reconnects during a restart; continueRestart stops it.)
+        if (restarting) {
+          endRestart();
+          return;
+        }
+      } else if (restarting && wasConnected) {
+        continueRestart();
       }
       statusChanged();
     },

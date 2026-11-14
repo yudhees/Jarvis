@@ -49,6 +49,20 @@ export function readSettings(configDir: string): EditableSettings {
   return out as EditableSettings;
 }
 
+/**
+ * A value as YAML text. Simple words stay plain (`windows`); anything else is
+ * double-quoted, since JSON string escaping is valid YAML.
+ */
+export function yamlScalar(value: unknown): string {
+  if (value === null) return 'null';
+  if (typeof value !== 'string') return String(value);
+  const plain =
+    /^[A-Za-z][A-Za-z0-9 ._-]*$/.test(value) &&
+    !value.endsWith(' ') &&
+    !/^(true|false|null|yes|no|on|off|y|n)$/i.test(value);
+  return plain ? value : JSON.stringify(value);
+}
+
 export type SettingsResult = { ok: true } | { ok: false; problems: string[] };
 
 /**
@@ -79,15 +93,23 @@ export function writeSettings(configDir: string, patch: unknown): SettingsResult
   if (changes.length === 0) return { ok: true };
 
   const file = path.join(configDir, FILE);
-  const doc = parseDocument(readFileSync(file, 'utf8'));
+  const source = readFileSync(file, 'utf8');
+  const doc = parseDocument(source);
+  // Replace only the characters of each changed value, so every comment and
+  // blank line in the file stays exactly where the user put it.
+  const edits: { start: number; end: number; text: string }[] = [];
   for (const [key, value] of changes) {
-    const where = key.split('.');
-    const node = doc.getIn(where, true);
-    // Change the value in place so the comment on that line stays.
-    if (isScalar(node)) node.value = value;
-    else doc.setIn(where, value);
+    const node = doc.getIn(key.split('.'), true);
+    if (!isScalar(node) || !node.range) {
+      return { ok: false, problems: [`${key}: not found in ${FILE}`] };
+    }
+    edits.push({ start: node.range[0], end: node.range[1], text: yamlScalar(value) });
   }
-  const whole = jarvisSchema.safeParse(doc.toJS());
+  let text = source;
+  for (const e of edits.sort((a, b) => b.start - a.start)) {
+    text = text.slice(0, e.start) + e.text + text.slice(e.end);
+  }
+  const whole = jarvisSchema.safeParse(parseDocument(text).toJS());
   if (!whole.success) {
     return {
       ok: false,
@@ -95,7 +117,7 @@ export function writeSettings(configDir: string, patch: unknown): SettingsResult
     };
   }
   const temp = `${file}.${process.pid}.tmp`;
-  writeFileSync(temp, doc.toString());
+  writeFileSync(temp, text);
   renameSync(temp, file);
   return { ok: true };
 }

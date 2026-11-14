@@ -14,9 +14,11 @@ contextBridge.exposeInMainWorld('jarvisSettings', {
     ipcRenderer.invoke('settings:preview', voice, Number(rate), String(text)),
   startCore: () => ipcRenderer.invoke('settings:start-core'),
   stopCore: () => ipcRenderer.invoke('settings:stop-core'),
-  /** 'running' | 'starting' | 'stopped', whenever it changes. */
+  restartCore: () => ipcRenderer.invoke('settings:restart-core'),
+  /** 'running' | 'starting' | 'restarting' | 'stopped', whenever it changes. */
   onStatus(callback) {
     ipcRenderer.on('settings:status', (_event, status) => callback(String(status)));
   },
+  usage: (days) => ipcRenderer.invoke('settings:usage', Number(days)),
   openConfigFolder: () => ipcRenderer.invoke('settings:open-config'),
 });

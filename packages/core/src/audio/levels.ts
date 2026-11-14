@@ -28,3 +28,35 @@ export function meterBar(dbfs: number, width = 40): string {
   const filled = Math.round(fraction * width);
   return `[${'#'.repeat(filled)}${'.'.repeat(width - filled)}] ${dbfs.toFixed(1).padStart(6)} dBFS`;
 }
+
+/**
+ * How "voiced" a frame is (0..1): the strongest normalized autocorrelation at a
+ * pitch period between `minHz` and `maxHz`. Vowels have a pitch and score high
+ * (above about 0.5); clicks, bumps, typing, rustling and fan hiss score low.
+ */
+export function voicing(pcm: Int16Array, sampleRate: number, minHz = 70, maxHz = 400): number {
+  const n = pcm.length;
+  const minLag = Math.max(1, Math.floor(sampleRate / maxHz));
+  const maxLag = Math.min(n - 32, Math.ceil(sampleRate / minHz));
+  if (maxLag <= minLag) return 0;
+  let mean = 0;
+  for (let i = 0; i < n; i++) mean += pcm[i] as number;
+  mean /= n;
+  const x = new Float64Array(n);
+  for (let i = 0; i < n; i++) x[i] = (pcm[i] as number) - mean;
+  let best = 0;
+  for (let lag = minLag; lag <= maxLag; lag++) {
+    let xy = 0;
+    let xx = 0;
+    let yy = 0;
+    for (let i = 0; i + lag < n; i++) {
+      const a = x[i] as number;
+      const b = x[i + lag] as number;
+      xy += a * b;
+      xx += a * a;
+      yy += b * b;
+    }
+    if (xx > 0 && yy > 0) best = Math.max(best, xy / Math.sqrt(xx * yy));
+  }
+  return best;
+}

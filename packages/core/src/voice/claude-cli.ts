@@ -261,7 +261,7 @@ export class ClaudeCliReplyModel implements ReplyModel {
     let s = this.#session;
     let message: string;
     if (s?.alive && s.model === req.model && s.system === system && same(s.sent, earlier)) {
-      message = `<context>\n${req.context}\n</context>\n\n${last.content}`;
+      message = `${contextBlock(req.context)}${last.content}`;
     } else {
       // New conversation, another model, or the process was stopped: start fresh
       // and give it the conversation so far in one message.
@@ -269,7 +269,7 @@ export class ClaudeCliReplyModel implements ReplyModel {
       const history = earlier.length
         ? `<earlier_conversation>\n${earlier.map((m) => `${m.role === 'user' ? 'User' : 'Jarvis'}: ${m.content}`).join('\n')}\n</earlier_conversation>\n\n`
         : '';
-      message = `<context>\n${req.context}\n</context>\n\n${history}${last.content}`;
+      message = `${contextBlock(req.context)}${history}${last.content}`;
     }
     const session = s;
 
@@ -345,4 +345,9 @@ export class ClaudeCliReplyModel implements ReplyModel {
     }, this.#o.idleStopMs);
     this.#idle.unref();
   }
+}
+
+/** The per-request context, or nothing when there is none (the classifier). */
+function contextBlock(context: string): string {
+  return context ? `<context>\n${context}\n</context>\n\n` : '';
 }

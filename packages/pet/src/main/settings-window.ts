@@ -1,6 +1,13 @@
 import path from 'node:path';
-import { LIVE_SETTINGS, readSettings, writeSettings } from '@jarvis/core/config';
+import {
+  expandWindowsVars,
+  LIVE_SETTINGS,
+  loadConfig,
+  readSettings,
+  writeSettings,
+} from '@jarvis/core/config';
 import { WindowsSapiTts } from '@jarvis/core/tts';
+import { readUsage } from '@jarvis/core/usage';
 import { BrowserWindow, type IpcMainInvokeEvent, ipcMain, nativeTheme, shell } from 'electron';
 import type { Appearance } from './appearance.ts';
 import type { PetPrefs } from './visibility.ts';
@@ -15,6 +22,8 @@ import type { PetPrefs } from './visibility.ts';
  * Every IPC call is checked to come from this window, never from the pet.
  */
 
+export type CoreStatus = 'running' | 'starting' | 'restarting' | 'stopped';
+
 export interface SettingsDeps {
   srcDir: string;
   configDir: string;
@@ -28,20 +37,30 @@ export interface SettingsDeps {
   clearLogo(): void;
   getBehavior(): PetPrefs & { startWithWindows: boolean };
   setBehavior(patch: unknown): void;
-  coreStatus(): 'running' | 'starting' | 'stopped';
+  coreStatus(): CoreStatus;
   startCore(): void;
   stopCore(): void;
+  restartCore(): void;
   /** The pet stays on screen while settings are open, so changes can be seen. */
   onOpenChange(open: boolean): void;
 }
 
 const PREVIEW_MAX_CHARS = 200;
 
+/** Jarvis's data folder (where core keeps usage totals). */
+function dataDir(configDir: string): string {
+  try {
+    return loadConfig(configDir).jarvis.dataDir;
+  } catch {
+    return path.normalize(expandWindowsVars('%APPDATA%/jarvis'));
+  }
+}
+
 let win: BrowserWindow | undefined;
 let tts: WindowsSapiTts | undefined;
 
 /** Tells an open Settings window that Jarvis started or stopped. */
-export function pushSettingsStatus(status: 'running' | 'starting' | 'stopped'): void {
+export function pushSettingsStatus(status: CoreStatus): void {
   if (win && !win.isDestroyed()) win.webContents.send('settings:status', status);
 }
 
@@ -144,9 +163,17 @@ export function registerSettingsIpc(deps: SettingsDeps): void {
     deps.startCore();
     return deps.coreStatus();
   });
+  handle('settings:restart-core', () => {
+    deps.restartCore();
+    return deps.coreStatus();
+  });
   handle('settings:stop-core', () => {
     deps.stopCore();
     return deps.coreStatus();
+  });
+  handle('settings:usage', (days) => {
+    const n = Number(days);
+    return readUsage(dataDir(deps.configDir), Number.isInteger(n) && n >= 1 && n <= 30 ? n : 14);
   });
   handle('settings:open-config', () => shell.openPath(deps.configDir));
 }

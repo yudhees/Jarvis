@@ -4,6 +4,9 @@ import { buildPromptParts, type PromptSkill } from '../agent/index.ts';
 import type { ModelsConfig } from '../config/index.ts';
 import type { Learner, Proposal } from '../learning/index.ts';
 import {
+  type Classifier,
+  type ClassifierOutcome,
+  classifyWithin,
   parseEscalation,
   parseModelCommand,
   type RequestKind,
@@ -143,6 +146,8 @@ export interface AskResult {
   usage: ModelUsage;
   /** Time until the first sentence was ready. */
   firstSentenceMs: number | null;
+  /** Set when the classifier was asked. */
+  classifier?: ClassifierOutcome;
 }
 
 export interface ConversationOptions {
@@ -156,6 +161,10 @@ export interface ConversationOptions {
    * gate exists (phase 3), only tier 0 tools are offered to the model.
    */
   toolTier?: (name: string) => number;
+  /** Haiku classifier for requests the code estimate is unsure about (rule 4). */
+  classifier?: Classifier;
+  /** Past this, the estimate stands (default 1.5 s). */
+  classifierTimeoutMs?: number;
   /** Turns kept in the model's context (user + assistant pairs). */
   maxTurns?: number;
   now?: () => Date;
@@ -315,12 +324,30 @@ export class Conversation {
     }
     this.#forcedNext = undefined;
 
-    const decision = route({
+    let decision = route({
       text: request,
       forced,
       followUpTier: this.#tier,
       learned: learner.routing(),
     });
+    // Rule 4: only when the code estimate is unsure; it may raise, never lower.
+    let classifier: ClassifierOutcome | undefined;
+    if (decision.needsClassifier && this.#o.classifier) {
+      classifier = await classifyWithin(
+        this.#o.classifier,
+        request,
+        decision.tier,
+        this.#o.classifierTimeoutMs ?? 1500,
+      );
+      if (classifier.raised) {
+        decision = {
+          ...decision,
+          tier: classifier.tier,
+          decidedBy: 'classifier',
+          reason: `classifier: ${classifier.classification?.reason || 'harder than it looks'}`,
+        };
+      }
+    }
     if (forced) {
       const p = await learner.observe({ type: 'forced_model', kind: decision.kind, tier: forced });
       this.#pending ??= p;
@@ -405,6 +432,7 @@ export class Conversation {
       escalations,
       usage,
       firstSentenceMs,
+      classifier,
     };
   }
 
