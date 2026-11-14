@@ -45,6 +45,7 @@ async function openKeywords(): Promise<{ spotter: KeywordSpotter | null; how: st
     const spotter = new WindowsKeywordSpotter({
       sampleRate: jarvis.audio.sampleRate,
       minConfidence: k.minConfidence,
+      gain: k.gain,
     });
     try {
       await spotter.start();
@@ -151,7 +152,7 @@ const loop = new VoiceLoop({
   },
   emit: show,
   fixTranscript: (text) => learner.fixTranscript(text),
-  hints: () => learner.vocabularyHints(),
+  hints: () => ['Jarvis', ...learner.vocabularyHints()],
   onWake: () => {
     stt.start().catch(() => {}); // load Whisper while the user is talking
   },

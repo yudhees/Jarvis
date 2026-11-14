@@ -4,7 +4,7 @@ import { Endpointer, type KeywordSpotter, NoiseFloor, rmsLevel } from '../audio/
 import { StateMachine } from '../state/index.ts';
 import type { SttProvider } from '../stt/index.ts';
 import type { TtsProvider } from '../tts/index.ts';
-import { matchCommand, stripWakeWord } from './commands.ts';
+import { isWakeWordOnly, matchCommand, stripWakeWord } from './commands.ts';
 import type { AskOptions, AskResult } from './conversation.ts';
 import { SpeechQueue } from './speech-queue.ts';
 
@@ -291,6 +291,11 @@ export class VoiceLoop {
       if (signal.aborted) return;
       log.sttMs = transcript.ms;
       const fix = this.#d.fixTranscript ?? ((s: string) => s);
+      if (isWakeWordOnly(transcript.text)) {
+        // Only "Jarvis" was heard: the request is still coming. Keep listening.
+        this.#listen(this.#d.timing.startTimeoutMs);
+        return;
+      }
       const text = fix(stripWakeWord(transcript.text));
       log.heard = text;
       if (!text) {

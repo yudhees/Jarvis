@@ -18,6 +18,7 @@ listening:
 keywords: # how Jarvis hears "Jarvis" (Ctrl+Alt+L always works too)
   provider: windows # windows = built-in recognizer, no account | picovoice | none = hotkey only
   minConfidence: 0.6 # windows: 0..1, higher = fewer false wakes, more misses
+  gain: 1 # windows: boost a quiet mic before recognizing; tune with: npm run wake-test -- --gain 4
   wake: jarvis # picovoice only: built-in keyword or a custom .ppn path
   stop: null # picovoice only: "Jarvis stop" .ppn path; null = saying "Jarvis" interrupts
   sensitivity: 0.5 # picovoice only: 0..1

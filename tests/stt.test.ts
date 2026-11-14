@@ -25,6 +25,7 @@ describe('cleanTranscript', () => {
     assert.equal(cleanTranscript(' [BLANK_AUDIO] '), '');
     assert.equal(cleanTranscript('(silence) Hello  there [MUSIC]'), 'Hello there');
     assert.equal(cleanTranscript('*coughs* Move the ticket'), 'Move the ticket');
+    assert.equal(cleanTranscript('(speaking in foreign language)'), '');
   });
 });
 

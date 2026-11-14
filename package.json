@@ -24,7 +24,8 @@
     "stt-test": "node scripts/stt-test.ts",
     "set-key": "node scripts/set-key.ts",
     "start": "node packages/core/src/main.ts",
-    "repl": "node scripts/repl.ts"
+    "repl": "node scripts/repl.ts",
+    "wake-test": "node scripts/wake-test.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.4",

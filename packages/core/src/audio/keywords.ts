@@ -90,13 +90,24 @@ export function parseKeywordLine(line: string, sampleRate: number): KeywordHit |
 export class WindowsKeywordSpotter implements KeywordSpotter {
   readonly #sampleRate: number;
   readonly #minConfidence: number;
+  readonly #gain: number;
+  readonly #debug: ((line: string) => void) | undefined;
   readonly #hits: KeywordHit[] = [];
   #ps: ChildProcess | undefined;
   #dead = false;
 
-  constructor(options: { sampleRate: number; minConfidence: number }) {
+  constructor(options: {
+    sampleRate: number;
+    minConfidence: number;
+    /** Volume boost for quiet laptop mics (1 = as is). The recognizer needs a clear level. */
+    gain?: number;
+    /** Every line the recognizer prints, including what it ignored (wake-test). */
+    debug?: (line: string) => void;
+  }) {
     this.#sampleRate = options.sampleRate;
     this.#minConfidence = options.minConfidence;
+    this.#gain = options.gain ?? 1;
+    this.#debug = options.debug;
   }
 
   /** Starts the recognizer (about 0.7 s). */
@@ -114,7 +125,11 @@ export class WindowsKeywordSpotter implements KeywordSpotter {
           '-MinConfidence',
           String(this.#minConfidence),
         ],
-        { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true },
+        {
+          stdio: ['pipe', 'pipe', 'pipe'],
+          windowsHide: true,
+          env: this.#debug ? { ...process.env, JARVIS_KEYWORD_DEBUG: '1' } : process.env,
+        },
       );
       this.#ps = ps;
       let ready = false;
@@ -140,6 +155,7 @@ export class WindowsKeywordSpotter implements KeywordSpotter {
           resolve();
           return;
         }
+        this.#debug?.(line);
         const hit = parseKeywordLine(line, this.#sampleRate);
         if (hit) this.#hits.push(hit);
       });
@@ -148,7 +164,8 @@ export class WindowsKeywordSpotter implements KeywordSpotter {
 
   process(frame: Int16Array): KeywordHit | null {
     if (!this.#dead) {
-      this.#ps?.stdin?.write(Buffer.from(frame.buffer, frame.byteOffset, frame.byteLength));
+      const out = this.#gain === 1 ? frame : amplify(frame, this.#gain);
+      this.#ps?.stdin?.write(Buffer.from(out.buffer, out.byteOffset, out.byteLength));
     }
     return this.#hits.shift() ?? null;
   }
@@ -158,4 +175,13 @@ export class WindowsKeywordSpotter implements KeywordSpotter {
     this.#ps?.kill();
     this.#ps = undefined;
   }
+}
+
+/** Louder copy of a frame, clipped to 16-bit range. */
+export function amplify(frame: Int16Array, gain: number): Int16Array {
+  const out = new Int16Array(frame.length);
+  for (let i = 0; i < frame.length; i++) {
+    out[i] = Math.max(-32768, Math.min(32767, Math.round((frame[i] ?? 0) * gain)));
+  }
+  return out;
 }

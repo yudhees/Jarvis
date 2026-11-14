@@ -1,5 +1,11 @@
 export { type ClaudeCliOptions, ClaudeCliReplyModel, findClaudeExe } from './claude-cli.ts';
-export { matchCommand, normalizeUtterance, type SpokenCommand, stripWakeWord } from './commands.ts';
+export {
+  isWakeWordOnly,
+  matchCommand,
+  normalizeUtterance,
+  type SpokenCommand,
+  stripWakeWord,
+} from './commands.ts';
 export {
   type AskOptions,
   type AskResult,

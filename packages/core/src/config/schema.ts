@@ -67,6 +67,8 @@ export const jarvisSchema = z.strictObject({
     provider: z.enum(['windows', 'picovoice', 'none']),
     /** Windows: lowest recognizer confidence that counts (0..1). */
     minConfidence: z.number().min(0).max(1),
+    /** Windows: volume boost before recognizing, for quiet mics (find it with npm run wake-test). */
+    gain: z.number().min(1).max(20),
     /** Picovoice: built-in keyword name, or a path to a Windows .ppn file. */
     wake: z.string().min(1),
     /** Picovoice: path to a "Jarvis stop" .ppn; null = the wake word also interrupts. */

@@ -50,8 +50,9 @@ export function resolveWhisper(
 }
 
 /** Whisper writes these for silence or noise; they are not words the user said. */
-const NON_SPEECH =
-  /\[(?:BLANK_AUDIO|MUSIC|NOISE|SOUND|INAUDIBLE|SILENCE)[^\]]*\]|\((?:silence|music|noise|inaudible|blank audio)[^)]*\)|\*[^*]*\*/gi;
+// Any [label], (label) or *label*: Whisper's descriptions of sound, like
+// "[BLANK_AUDIO]", "(speaking in foreign language)" or "*coughs*".
+const NON_SPEECH = /\[[^\]]*\]|\([^)]*\)|\*[^*]*\*/g;
 
 export function cleanTranscript(raw: string): string {
   return raw.replace(NON_SPEECH, ' ').replace(/\s+/g, ' ').trim();

@@ -14,6 +14,7 @@ import type { SttProvider } from '@jarvis/core/stt';
 import { type TtsProvider, WindowsSapiTts } from '@jarvis/core/tts';
 import {
   Conversation,
+  isWakeWordOnly,
   type ModelRequest,
   matchCommand,
   type ReplyModel,
@@ -650,5 +651,17 @@ describe('WindowsKeywordSpotter (live)', { skip: process.platform !== 'win32' },
       spotter.release();
       await tts.close();
     }
+  });
+});
+
+describe('heard only the wake word', () => {
+  it('keeps listening instead of answering "Jabbies!"', () => {
+    assert.equal(isWakeWordOnly('Jabbies!'), true);
+    assert.equal(isWakeWordOnly('Hey Javis.'), true);
+    assert.equal(isWakeWordOnly('Jarvis'), true);
+    assert.equal(isWakeWordOnly('James'), true, 'close enough when it is all that was said');
+    assert.equal(isWakeWordOnly('Jarvis, what time is it?'), false);
+    assert.equal(isWakeWordOnly('Travis'), false);
+    assert.equal(isWakeWordOnly('Hello'), false);
   });
 });
