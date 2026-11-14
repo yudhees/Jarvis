@@ -24,6 +24,15 @@ let turn = 0;
 createInterface({ input: process.stdin }).on('line', (line) => {
   const content = JSON.parse(line).message.content;
   turn++;
+  if (turn === 1) {
+    // Like the real CLI: the init report comes with the first message.
+    out({
+      type: 'system',
+      subtype: 'init',
+      tools: process.env.FAKE_CLI_TOOLS ? process.env.FAKE_CLI_TOOLS.split(',') : [],
+      mcp_servers: [],
+    });
+  }
   if (content.includes('REPORT')) {
     const flag = (name) => args[args.indexOf(name) + 1];
     say(

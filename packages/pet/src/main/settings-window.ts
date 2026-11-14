@@ -1,3 +1,4 @@
+import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import {
   expandWindowsVars,
@@ -7,8 +8,17 @@ import {
   writeSettings,
 } from '@jarvis/core/config';
 import { WindowsSapiTts } from '@jarvis/core/tts';
-import { readUsage } from '@jarvis/core/usage';
-import { BrowserWindow, type IpcMainInvokeEvent, ipcMain, nativeTheme, shell } from 'electron';
+import { historyToJsonl, localDate, readHistory, readUsage } from '@jarvis/core/usage';
+import type { VoiceTestResult } from '@jarvis/shared';
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  type IpcMainInvokeEvent,
+  ipcMain,
+  nativeTheme,
+  shell,
+} from 'electron';
 import type { Appearance } from './appearance.ts';
 import type { PetPrefs } from './visibility.ts';
 
@@ -41,11 +51,15 @@ export interface SettingsDeps {
   startCore(): void;
   stopCore(): void;
   restartCore(): void;
+  /** Asks core to listen once and report (not answer). False when core isn't connected. */
+  voiceTest(): boolean;
   /** The pet stays on screen while settings are open, so changes can be seen. */
   onOpenChange(open: boolean): void;
 }
 
 const PREVIEW_MAX_CHARS = 200;
+/** Conversations shown in the History tab. */
+const HISTORY_SHOWN = 10;
 
 /** Jarvis's data folder (where core keeps usage totals). */
 function dataDir(configDir: string): string {
@@ -60,6 +74,11 @@ let win: BrowserWindow | undefined;
 let tts: WindowsSapiTts | undefined;
 
 /** Tells an open Settings window that Jarvis started or stopped. */
+/** Sends a voice test report from core to an open Settings window. */
+export function pushVoiceTest(result: VoiceTestResult): void {
+  if (win && !win.isDestroyed()) win.webContents.send('settings:voice-test', result);
+}
+
 export function pushSettingsStatus(status: CoreStatus): void {
   if (win && !win.isDestroyed()) win.webContents.send('settings:status', status);
 }
@@ -159,6 +178,7 @@ export function registerSettingsIpc(deps: SettingsDeps): void {
       pcm: new Uint8Array(audio.pcm.buffer, audio.pcm.byteOffset, audio.pcm.byteLength),
     };
   });
+  handle('settings:voice-test', () => deps.voiceTest());
   handle('settings:start-core', () => {
     deps.startCore();
     return deps.coreStatus();
@@ -174,6 +194,22 @@ export function registerSettingsIpc(deps: SettingsDeps): void {
   handle('settings:usage', (days) => {
     const n = Number(days);
     return readUsage(dataDir(deps.configDir), Number.isInteger(n) && n >= 1 && n <= 30 ? n : 14);
+  });
+  handle('settings:history', () => readHistory(dataDir(deps.configDir), HISTORY_SHOWN));
+  handle('settings:history-download', async (scope) => {
+    const all = scope === 'all';
+    const conversations = readHistory(dataDir(deps.configDir), all ? null : HISTORY_SHOWN);
+    if (!conversations.length || !win) return { saved: false, count: 0 };
+    const name = `jarvis-conversations-${all ? 'all' : 'last-10'}-${localDate()}.jsonl`;
+    const pick = await dialog.showSaveDialog(win, {
+      title: 'Save conversations',
+      defaultPath: path.join(app.getPath('downloads'), name),
+      filters: [{ name: 'JSON Lines', extensions: ['jsonl'] }],
+    });
+    if (pick.canceled || !pick.filePath) return { saved: false, count: 0 };
+    writeFileSync(pick.filePath, historyToJsonl(conversations));
+    shell.showItemInFolder(pick.filePath);
+    return { saved: true, count: conversations.length };
   });
   handle('settings:open-config', () => shell.openPath(deps.configDir));
 }

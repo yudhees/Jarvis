@@ -1,4 +1,18 @@
 export {
+  CONVERSATION_GAP_MS,
+  groupConversations,
+  type HistoryConversation,
+  HistoryLog,
+  type HistoryOutcome,
+  type HistorySource,
+  type HistoryTurn,
+  historyToJsonl,
+  parseHistoryTurn,
+  readHistory,
+  redactSecrets,
+  toHistoryTurn,
+} from './history.ts';
+export {
   addTurn,
   type DayUsage,
   emptyDay,

@@ -26,6 +26,7 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { loadConfig } from '@jarvis/core/config';
+import { VAD_MODEL } from '@jarvis/core/stt';
 import { scriptArgs } from './args.ts';
 
 /** Pinned build: whisper.cpp b5454 (v1.9.5), published 2026-10-06. */
@@ -176,6 +177,14 @@ await download(
   path.join(modelDir, model),
   modelSha,
   `model ${model}`,
+);
+
+// 3. Silero VAD (0.9 MB): lets whisper-server skip silence and background noise.
+await download(
+  `https://huggingface.co/ggml-org/whisper-vad/resolve/main/${VAD_MODEL.file}`,
+  path.join(modelDir, VAD_MODEL.file),
+  VAD_MODEL.sha256,
+  `VAD model ${VAD_MODEL.file}`,
 );
 
 // Tell core where the server is (read by resolveWhisper).

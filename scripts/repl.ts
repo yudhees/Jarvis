@@ -11,6 +11,7 @@
 import { createInterface } from 'node:readline';
 import { PvSpeakerPlayer } from '@jarvis/core/audio';
 import { loadConfig } from '@jarvis/core/config';
+import { matchApproval, matchConfirmCode } from '@jarvis/core/guard';
 import { WindowsSapiTts } from '@jarvis/core/tts';
 import { matchCommand, openConversation, SpeechQueue } from '@jarvis/core/voice';
 import { scriptArgs } from './args.ts';
@@ -46,9 +47,70 @@ console.log(
 const MODEL_LETTER = { simple: 'H', standard: 'S', complex: 'O' } as const;
 
 const rl = createInterface({ input: process.stdin, output: process.stdout });
+// Lines are queued, so an approval question can read the next one while a
+// request is still running.
+const lines: string[] = [];
+let waiting: ((line: string | null) => void) | undefined;
+let closed = false;
+rl.on('line', (l) => {
+  if (waiting) {
+    const w = waiting;
+    waiting = undefined;
+    w(l);
+  } else {
+    lines.push(l);
+  }
+});
+rl.on('close', () => {
+  closed = true;
+  waiting?.(null);
+});
+const nextLine = (timeoutMs?: number): Promise<string | null> => {
+  const queued = lines.shift();
+  if (queued !== undefined) return Promise.resolve(queued);
+  if (closed) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const timer = timeoutMs
+      ? setTimeout(() => {
+          waiting = undefined;
+          resolve(null);
+        }, timeoutMs)
+      : undefined;
+    waiting = (l) => {
+      clearTimeout(timer);
+      resolve(l);
+    };
+  });
+};
+
+// Approval in the REPL is typed (for testing only; with voice it is spoken).
+// The same strict matcher applies: "yes approve" or "go ahead", or the code.
+opened.setApprover(async (request) => {
+  const how = request.code ? `Type: confirm ${request.code}` : 'Type: yes approve, or cancel';
+  console.log(`Jarvis: ${request.sentence} (${how})`);
+  if (request.fullText !== request.sentence) {
+    console.log(`  ${request.fullText.replace(/\n/g, '\n  ')}`);
+  }
+  for (let attempt = 0; attempt < 2; attempt++) {
+    process.stdout.write('Approve? ');
+    const heard = await nextLine(jarvis.approval.timeoutSeconds * 1000);
+    if (heard === null) return { outcome: 'timeout' };
+    if (!process.stdin.isTTY) console.log(heard);
+    if (request.code) return { outcome: matchConfirmCode(heard, request.code), heard };
+    const answer = matchApproval(heard);
+    if (answer !== 'unclear') return { outcome: answer, heard };
+    console.log('Jarvis: Please say yes approve, or cancel.');
+  }
+  return { outcome: 'cancel' };
+});
+console.log(`Tools: ${opened.toolNames.join(', ') || 'none'}. Jira: ${opened.jira}.${opened.dryRun ? ' DRY RUN.' : ''}
+`);
+
 const prompt = () => process.stdout.write('You: ');
-prompt();
-for await (const raw of rl) {
+for (;;) {
+  prompt();
+  const raw = await nextLine();
+  if (raw === null) break;
   const line = raw.trim();
   if (!process.stdin.isTTY) console.log(line);
   if (line === ':quit') break;
@@ -90,7 +152,6 @@ for await (const raw of rl) {
       }
     }
   }
-  prompt();
 }
 rl.close();
 await tts?.close();

@@ -8,7 +8,8 @@ import { ClaudeCliReplyModel, type LocalTool, type ModelRequest } from '@jarvis/
 
 const FAKE = path.join(import.meta.dirname, 'fixtures', 'fake-claude.mjs');
 const dir = mkdtempSync(path.join(os.tmpdir(), 'jarvis-cli-'));
-after(() => rmSync(dir, { recursive: true, force: true }));
+// Stopped CLI processes can hold the folder for a moment on Windows.
+after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }));
 
 function model(idleStopMs = 60_000) {
   return new ClaudeCliReplyModel({
@@ -149,5 +150,37 @@ describe('LocalMemoryFiles', () => {
     await b.delete(created.id);
     assert.equal((await new LocalMemoryFiles(file).listAll()).length, 0);
     assert.doesNotThrow(() => JSON.parse(readFileSync(file, 'utf8')));
+  });
+});
+
+describe('startup self-test (CLAUDE.md 4)', () => {
+  it('passes when the CLI sees no tools and no MCP servers', async () => {
+    assert.deepEqual(await model().selfTest('claude-haiku-5-5', 5000), { tools: 0, mcpServers: 0 });
+  });
+
+  it('refuses when the CLI can see any tool', async () => {
+    process.env.FAKE_CLI_TOOLS = 'Bash,Read';
+    try {
+      await assert.rejects(
+        model().selfTest('claude-haiku-5-5', 5000),
+        /Lockdown failed: .* 2 tools/,
+      );
+    } finally {
+      delete process.env.FAKE_CLI_TOOLS;
+    }
+  });
+
+  it('a session that reports tools is shut down before answering', async () => {
+    process.env.FAKE_CLI_TOOLS = 'Bash';
+    const m = model();
+    try {
+      await assert.rejects(
+        m.stream(req([{ role: 'user', content: 'hi' }]), () => {}),
+        /Lockdown failed/,
+      );
+    } finally {
+      delete process.env.FAKE_CLI_TOOLS;
+      await m.close();
+    }
   });
 });

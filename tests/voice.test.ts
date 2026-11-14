@@ -882,3 +882,86 @@ describe('waking on what Whisper hears', () => {
     assert.equal(afterWakeWord('The tattoos'), null);
   });
 });
+
+describe('voice test (Settings: what would be sent to Claude)', () => {
+  const result = (events: CoreToPetEvent[]) =>
+    events.find((e) => e.type === 'voice_test_result') as
+      | Extract<CoreToPetEvent, { type: 'voice_test_result' }>
+      | undefined;
+
+  it('reports the cleaned text without asking Claude, then the next request is answered normally', async () => {
+    const t = fakeLoop('Four.', 30, { heard: ['Hey Jarvis, open Slack.', "what's two plus two"] });
+    const quit = new AbortController();
+    const running = t.loop.run(quit.signal);
+    t.feed.push(QUIET, 20);
+    assert.equal(t.loop.testVoice(), true);
+    say(t.feed);
+    await until(() => result(t.events) !== undefined);
+    const r = result(t.events);
+    assert.equal(r?.heard, 'Hey Jarvis, open Slack.');
+    assert.equal(r?.text, 'open Slack.');
+    assert.equal(r?.outcome, 'agent');
+    assert.equal(t.asked.length, 0, 'nothing went to Claude');
+    await until(() => t.loop.state === 'SLEEPING');
+    assert.ok(!t.events.some((e) => e.type === 'reply_text'), 'nothing was said');
+
+    // The test covered one utterance only.
+    t.feed.push(WAKE);
+    say(t.feed);
+    await until(() => t.asked.length === 1);
+    quit.abort();
+    await running;
+  });
+
+  it('a spoken command is recognised but not run', async () => {
+    const t = fakeLoop('x', 30, { heard: ['mute'] });
+    const quit = new AbortController();
+    const running = t.loop.run(quit.signal);
+    t.feed.push(QUIET, 20);
+    t.loop.testVoice();
+    say(t.feed);
+    await until(() => result(t.events) !== undefined);
+    assert.equal(result(t.events)?.outcome, 'command');
+    assert.equal(result(t.events)?.detail, 'mute');
+    await until(() => t.loop.state === 'SLEEPING');
+    assert.ok(!t.states.includes('MUTED'), 'not muted');
+    quit.abort();
+    await running;
+  });
+
+  it('silence reports nothing heard; refused while busy', async () => {
+    const t = fakeLoop('A long answer.', 2000);
+    const quit = new AbortController();
+    const running = t.loop.run(quit.signal);
+    t.feed.push(QUIET, 20);
+    t.loop.testVoice();
+    t.feed.push(QUIET, 45); // longer than startTimeoutMs (1 s)
+    await until(() => result(t.events) !== undefined);
+    assert.equal(result(t.events)?.outcome, 'nothing');
+    t.feed.push(WAKE);
+    say(t.feed);
+    await until(() => t.loop.state === 'SPEAKING');
+    assert.equal(t.loop.testVoice(), false);
+    quit.abort();
+    await running;
+  });
+});
+
+describe('Conversation.preview', () => {
+  it('shows the request and route without calling the model or learning anything', async () => {
+    const model = new FakeModel(() => 'never');
+    const learner = await learnerOf();
+    const c = new Conversation({ model, models, learner });
+    const p = c.preview('use opus why is the build failing step by step');
+    assert.equal(p.outcome, 'agent');
+    if (p.outcome === 'agent') {
+      assert.equal(p.request, 'why is the build failing step by step');
+      assert.equal(p.decision.tier, 'complex');
+      assert.equal(p.model, models.tiers.complex);
+    }
+    assert.equal(c.preview('use sonnet').outcome, 'model_command');
+    assert.equal(c.preview('remember that I prefer short answers').outcome, 'learning');
+    assert.equal(model.requests.length, 0);
+    assert.equal(learner.aboutUserBlock(), '', 'nothing saved');
+  });
+});

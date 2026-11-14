@@ -18,6 +18,41 @@ export interface WhisperCppOptions {
    * 0 keeps it running.
    */
   idleStopMs?: number;
+  /** Silero VAD model; when set, only the speech parts of the audio are decoded. */
+  vadModelPath?: string;
+  /** 1 or unset = greedy; above 1 = beam search with this many beams. */
+  beamSize?: number;
+  /** Drop non-speech tokens while decoding. */
+  suppressNonSpeech?: boolean;
+}
+
+/** Silero VAD for whisper.cpp, from huggingface.co/ggml-org/whisper-vad. */
+export const VAD_MODEL = {
+  file: 'ggml-silero-v6.2.0.bin',
+  sha256: '2aa269b785eeb53a82983a20501ddf7c1d9c48e33ab63a41391ac6c9f7fb6987',
+} as const;
+
+/** whisper-server command line (exported for tests). */
+export function serverArgs(o: WhisperCppOptions): string[] {
+  const args = [
+    '-m',
+    o.modelPath,
+    '--host',
+    '127.0.0.1',
+    '--port',
+    String(o.port),
+    '-t',
+    String(o.threads),
+    '-l',
+    o.language,
+    '-nt',
+    '-ng',
+  ];
+  // The default 30 ms of padding clips the first sound ("Why is the" heard as "YSB").
+  if (o.vadModelPath) args.push('--vad', '-vm', o.vadModelPath, '-vp', '200');
+  if (o.beamSize && o.beamSize > 1) args.push('-bs', String(o.beamSize));
+  if (o.suppressNonSpeech) args.push('-sns');
+  return args;
 }
 
 /** Written by `npm run setup-whisper`. */
@@ -31,11 +66,16 @@ export function installFile(dataDir: string): string {
   return path.join(dataDir, 'whisper', 'install.json');
 }
 
-/** Finds the installed server and model, or explains how to install them. */
+/**
+ * Finds the installed server and model, or explains how to install them. With
+ * `vad`, also the VAD model; if that one is missing, speech-to-text still works
+ * without it (`vadModelPath` is undefined and `vadMissing` says why).
+ */
 export function resolveWhisper(
   dataDir: string,
   model: string,
-): { serverExe: string; modelPath: string } {
+  opts: { vad?: boolean } = {},
+): { serverExe: string; modelPath: string; vadModelPath?: string; vadMissing?: string } {
   const file = installFile(dataDir);
   const modelPath = path.join(dataDir, 'models', model);
   if (!existsSync(file)) throw new Error('Whisper is not installed. Run: npm run setup-whisper');
@@ -46,7 +86,16 @@ export function resolveWhisper(
   if (!existsSync(modelPath)) {
     throw new Error(`Model ${model} is missing. Run: npm run setup-whisper -- --model ${model}`);
   }
-  return { serverExe: install.server, modelPath };
+  if (!opts.vad) return { serverExe: install.server, modelPath };
+  const vadPath = path.join(dataDir, 'models', VAD_MODEL.file);
+  if (!existsSync(vadPath)) {
+    return {
+      serverExe: install.server,
+      modelPath,
+      vadMissing: `VAD model ${VAD_MODEL.file} is missing, so speech-to-text runs without it. Run: npm run setup-whisper`,
+    };
+  }
+  return { serverExe: install.server, modelPath, vadModelPath: vadPath };
 }
 
 /** Whisper writes these for silence or noise; they are not words the user said. */
@@ -64,7 +113,7 @@ export function cleanTranscript(raw: string): string {
  * is sent in memory and never written to disk (10.4).
  */
 export class WhisperCppStt implements SttProvider {
-  private readonly options: WhisperCppOptions;
+  readonly options: WhisperCppOptions;
   private proc: ChildProcess | undefined;
   private ready: Promise<void> | undefined;
   private stderrTail = '';
@@ -94,24 +143,10 @@ export class WhisperCppStt implements SttProvider {
     if (this.ready) return this.ready;
     this.ready = new Promise<void>((resolve, reject) => {
       const o = this.options;
-      const proc = spawn(
-        o.serverExe,
-        [
-          '-m',
-          o.modelPath,
-          '--host',
-          '127.0.0.1',
-          '--port',
-          String(o.port),
-          '-t',
-          String(o.threads),
-          '-l',
-          o.language,
-          '-nt',
-          '-ng',
-        ],
-        { windowsHide: true, cwd: path.dirname(o.serverExe) },
-      );
+      const proc = spawn(o.serverExe, serverArgs(o), {
+        windowsHide: true,
+        cwd: path.dirname(o.serverExe),
+      });
       this.proc = proc;
       proc.stderr?.setEncoding('utf8');
       proc.stdout?.setEncoding('utf8');

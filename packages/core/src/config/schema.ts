@@ -104,6 +104,17 @@ export const jarvisSchema = z.strictObject({
   files: z.strictObject({
     allowedFolders: z.array(z.string().min(1)),
   }),
+  /** Jira Cloud (phase 3). The API token lives in Credential Manager: npm run set-key -- jira */
+  jira: z.strictObject({
+    site: z
+      .string()
+      .regex(
+        /^https:\/\/[\w.-]+\.atlassian\.net\/?$/,
+        'must look like https://yourcompany.atlassian.net',
+      )
+      .nullable(),
+    email: z.email().nullable(),
+  }),
   retention: z.strictObject({
     transcriptDays: positiveInt,
   }),
@@ -126,6 +137,12 @@ export const jarvisSchema = z.strictObject({
     threads: z.int().min(1).max(32),
     port: z.int().min(1024).max(65535),
     idleStopSeconds: z.int().min(0).max(86400),
+    /** Silero VAD inside whisper-server: only the speech parts are decoded. */
+    vad: z.boolean(),
+    /** 1 = greedy (fastest); 2-8 = beam search, more accurate and a little slower. */
+    beamSize: z.int().min(1).max(8),
+    /** Drop non-speech tokens (music notes, sound labels) while decoding. */
+    suppressNonSpeech: z.boolean(),
   }),
   routing: z.strictObject({
     /** Ask Haiku about requests the code estimate is unsure of (CLAUDE.md 7 rule 4). */
@@ -134,6 +151,17 @@ export const jarvisSchema = z.strictObject({
     classifierTimeoutSeconds: z.number().min(0.2).max(10),
     /** Keep the per-request routing log this many days (no transcripts in it). */
     logDays: z.int().min(1).max(365),
+  }),
+  apps: z.strictObject({
+    /** Open apps and web pages by voice (tier 1 tools open_app, open_url). */
+    enabled: z.boolean(),
+    /** Browser for "show me ...": a name like Vivaldi, or "" for the Windows default. */
+    browser: z.string(),
+    /** Web search address; {query} is replaced. Only https. */
+    searchUrl: z
+      .string()
+      .regex(/^https:\/\/[^\s]+$/, 'must be an https address')
+      .refine((s) => s.includes('{query}'), 'must contain {query}'),
   }),
   learning: z.strictObject({
     enabled: z.boolean(),

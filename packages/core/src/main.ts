@@ -24,9 +24,9 @@ import { RequestLog } from './router/index.ts';
 import { readSecret } from './secrets/index.ts';
 import { resolveWhisper, WhisperCppStt } from './stt/index.ts';
 import { WindowsSapiTts } from './tts/index.ts';
-import { UsageLog } from './usage/index.ts';
-import { type TurnLog, VoiceLoop, WAKE_HINT } from './voice/index.ts';
-import { MissingKeyError, openConversation } from './voice/open.ts';
+import { HistoryLog, UsageLog } from './usage/index.ts';
+import { ClaudeCliReplyModel, type TurnLog, VoiceLoop, WAKE_HINT } from './voice/index.ts';
+import { LockdownError, MissingKeyError, openConversation } from './voice/open.ts';
 
 const { values: args } = parseArgs({ options: { local: { type: 'boolean' } }, strict: true });
 const config = loadConfig();
@@ -90,13 +90,32 @@ try {
   opened = await openConversation(config, { local: args.local, projectDir: process.cwd() });
 } catch (err) {
   console.error(
-    err instanceof MissingKeyError ? err.message : `Startup failed: ${(err as Error).message}`,
+    err instanceof MissingKeyError || err instanceof LockdownError
+      ? err.message
+      : `Startup failed: ${(err as Error).message}`,
   );
   process.exit(1);
 }
 const { conversation, learner } = opened;
 
-const { serverExe, modelPath } = resolveWhisper(jarvis.dataDir, jarvis.stt.model);
+// Startup self-test (CLAUDE.md 4): the Claude CLI must see no tools and no MCP
+// servers; Jarvis runs every tool itself, behind the gate. Refuse to start if not.
+if (opened.model instanceof ClaudeCliReplyModel) {
+  try {
+    await opened.model.selfTest(config.models.tiers.simple);
+  } catch (err) {
+    console.error(`Startup self-test failed: ${(err as Error).message}`);
+    await opened.close();
+    process.exit(1);
+  }
+}
+
+const { serverExe, modelPath, vadModelPath, vadMissing } = resolveWhisper(
+  jarvis.dataDir,
+  jarvis.stt.model,
+  { vad: jarvis.stt.vad },
+);
+if (vadMissing) console.warn(vadMissing);
 const stt = new WhisperCppStt({
   serverExe,
   modelPath,
@@ -104,6 +123,9 @@ const stt = new WhisperCppStt({
   threads: jarvis.stt.threads,
   language: jarvis.stt.language,
   idleStopMs: jarvis.stt.idleStopSeconds * 1000,
+  vadModelPath,
+  beamSize: jarvis.stt.beamSize,
+  suppressNonSpeech: jarvis.stt.suppressNonSpeech,
 });
 const tts = new WindowsSapiTts({
   voice: jarvis.voice.voice,
@@ -149,6 +171,17 @@ function show(event: CoreToPetEvent): void {
 // Daily totals for the Settings window's Usage tab (numbers only, kept 30 days).
 const usage = new UsageLog(jarvis.dataDir, jarvis.retention.transcriptDays);
 usage.prune();
+// Conversation text for the History tab (secrets blanked, kept as long as transcripts).
+const history = new HistoryLog(jarvis.dataDir, jarvis.retention.transcriptDays);
+history.prune();
+// Retention also runs once a day for a Jarvis left running (CLAUDE.md 10.7).
+setInterval(
+  () => {
+    usage.prune();
+    history.prune();
+  },
+  24 * 60 * 60 * 1000,
+).unref();
 
 const requestLog = new RequestLog(path.join(jarvis.dataDir, 'routing'), jarvis.routing.logDays);
 
@@ -185,6 +218,7 @@ function recordTurn(t: TurnLog): void {
 function logTurn(t: TurnLog): void {
   recordTurn(t);
   usage.record(t);
+  history.record(t);
   const ms = (n: number | null) => (n === null ? '-' : `${Math.round(n)} ms`);
   const r = t.result;
   const parts = [
@@ -221,7 +255,19 @@ const bridge = new PetBridge({
     if (event.type === 'stop') loop.stop();
     else if (event.type === 'mute') loop.mute();
     else if (event.type === 'unmute') loop.unmute();
-    else if (event.type === 'quit') {
+    else if (event.type === 'voice_test') {
+      // Settings window: listen once, report, answer nothing (VoiceLoop.testVoice).
+      if (!loop.testVoice()) {
+        bridge.send({
+          type: 'voice_test_result',
+          outcome: 'nothing',
+          heard: '',
+          text: '',
+          sttMs: 0,
+          detail: loop.state === 'MUTED' ? 'muted' : 'busy',
+        });
+      }
+    } else if (event.type === 'quit') {
       // Asked by the pet (its Stop button or Quit): the pet stays open, so it
       // can start Jarvis again.
       petAskedToQuit = true;
@@ -313,8 +359,12 @@ process.on('SIGINT', () => {
   quit.abort();
 });
 
+// Spoken approval goes to the voice loop: it asks, listens, and matches strictly.
+opened.setApprover((request) => loop.approver.ask(request));
+
 console.log(
   `Jarvis is ready. Brain: ${opened.brain}. Memory: ${opened.memory}. ${opened.skillCount} skills found.\n` +
+    `Tools: ${opened.toolNames.join(', ') || 'none'}. Jira: ${opened.jira}. Files: ${opened.folders.join(', ') || 'off'}.${opened.dryRun ? ' DRY RUN: approved changes are only logged.' : ''}\n` +
     `${wakeHow}, then your request (or Ctrl+Alt+L). ` +
     'Ctrl+Alt+J stops, Ctrl+Alt+M mutes, Ctrl+C quits.',
 );

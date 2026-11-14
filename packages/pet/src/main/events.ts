@@ -1,4 +1,10 @@
-import { CORE_TO_PET_TYPES, type CoreToPetEvent, INPUT_LIMITS, STATES } from '@jarvis/shared';
+import {
+  CORE_TO_PET_TYPES,
+  type CoreToPetEvent,
+  INPUT_LIMITS,
+  STATES,
+  type VoiceTestResult,
+} from '@jarvis/shared';
 
 const TYPES = new Set<string>(CORE_TO_PET_TYPES);
 const STATE_SET = new Set<string>(STATES);
@@ -30,6 +36,49 @@ function isValidInputRequest(e: Record<string, unknown>): boolean {
         typeof o === 'string' && o.trim().length > 0 && o.length <= INPUT_LIMITS.maxOptionLength,
     )
   );
+}
+
+const TEST_OUTCOMES = new Set([
+  'nothing',
+  'command',
+  'pending_answer',
+  'learning',
+  'model_command',
+  'agent',
+]);
+const TIER_SET = new Set(['simple', 'standard', 'complex']);
+const SPEED_SET = new Set(['instant', 'normal', 'background']);
+const short = (v: unknown, max = 200): string | undefined =>
+  typeof v === 'string' && v.length <= max ? v : undefined;
+
+/**
+ * Voice test report: copies only known fields, each checked, so nothing else
+ * from core reaches the Settings window.
+ */
+function cleanVoiceTest(e: Record<string, unknown>): VoiceTestResult | null {
+  if (typeof e.outcome !== 'string' || !TEST_OUTCOMES.has(e.outcome)) return null;
+  if (!isText(e.heard) || !isText(e.text)) return null;
+  const out: VoiceTestResult = {
+    type: 'voice_test_result',
+    outcome: e.outcome as VoiceTestResult['outcome'],
+    heard: e.heard,
+    text: e.text,
+    sttMs: typeof e.sttMs === 'number' && e.sttMs >= 0 ? e.sttMs : 0,
+  };
+  const detail = short(e.detail, 60);
+  if (detail) out.detail = detail;
+  if (isText(e.request)) out.request = e.request;
+  if (TIER_SET.has(String(e.tier))) out.tier = e.tier as VoiceTestResult['tier'];
+  if (SPEED_SET.has(String(e.speed))) out.speed = e.speed as VoiceTestResult['speed'];
+  for (const key of ['model', 'decidedBy', 'reason', 'kind'] as const) {
+    const v = short(e[key]);
+    if (v) out[key] = v;
+  }
+  if (typeof e.classifier === 'boolean') out.classifier = e.classifier;
+  if (Array.isArray(e.skills)) {
+    out.skills = e.skills.filter((s): s is string => short(s, 120) !== undefined).slice(0, 10);
+  }
+  return out;
 }
 
 /** Checks a typed or clicked answer before it goes to core. */
@@ -95,6 +144,8 @@ export function parseCoreEvent(raw: unknown): CoreToPetEvent | null {
       return isValidInputRequest(e) ? (e as unknown as CoreToPetEvent) : null;
     case 'input_closed':
       return isId(e.id) ? (e as unknown as CoreToPetEvent) : null;
+    case 'voice_test_result':
+      return cleanVoiceTest(e);
     default:
       return null;
   }

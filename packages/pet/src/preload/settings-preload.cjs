@@ -20,5 +20,15 @@ contextBridge.exposeInMainWorld('jarvisSettings', {
     ipcRenderer.on('settings:status', (_event, status) => callback(String(status)));
   },
   usage: (days) => ipcRenderer.invoke('settings:usage', Number(days)),
+  /** Ask Jarvis to listen once and report what it heard (nothing is answered). */
+  voiceTest: () => ipcRenderer.invoke('settings:voice-test'),
+  onVoiceTest(callback) {
+    ipcRenderer.on('settings:voice-test', (_event, result) => callback(result));
+  },
+  /** The last 10 conversations, newest first. */
+  history: () => ipcRenderer.invoke('settings:history'),
+  /** Save as JSONL: 'recent' (the last 10) or 'all' (everything kept). */
+  downloadHistory: (scope) =>
+    ipcRenderer.invoke('settings:history-download', scope === 'all' ? 'all' : 'recent'),
   openConfigFolder: () => ipcRenderer.invoke('settings:open-config'),
 });

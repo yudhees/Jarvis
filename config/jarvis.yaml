@@ -50,7 +50,12 @@ budget:
   dailyTokens: null
 
 files:
-  allowedFolders: [] # open decision (section 17)
+  # File tools work only inside these folders (decided 2026-11-14). %VARS% are expanded.
+  allowedFolders: ["%USERPROFILE%/Documents/Jarvis"]
+
+jira: # Jira Cloud. Token: npm run set-key -- jira (id.atlassian.com > Security > API tokens)
+  site: null # e.g. https://yourcompany.atlassian.net
+  email: null # the email you sign in to Atlassian with
 
 retention:
   transcriptDays: 30
@@ -72,11 +77,19 @@ stt:
   threads: 4
   port: 8178 # local whisper-server, bound to 127.0.0.1 only
   idleStopSeconds: 60 # unload the model after a minute of no speech (frees ~140 MB RAM); 0 = keep loaded
+  vad: true # Silero VAD (0.9 MB): only speech is decoded, so background noise isn't turned into words
+  beamSize: 5 # 1 = fastest; 5 = more accurate, a little slower
+  suppressNonSpeech: true # drop non-speech tokens (sound labels, music notes)
 
 routing: # how each request picks Haiku, Sonnet or Opus (CLAUDE.md 7)
   classifier: false # ask Haiku when the rules are unsure. Off: through the Claude CLI it takes 1.7-4 s, over the 1.5 s limit, so it would only cost a second process; worth it with brain.provider: api
   classifierTimeoutSeconds: 1.5 # slower than this and the rules' choice stands
   logDays: 30 # per-request routing log in %APPDATA%/jarvis/routing (no transcripts)
+
+apps:
+  enabled: true # "open Slack", "show me the weather": opens apps and web pages (tier 1)
+  browser: "Vivaldi" # or Chrome, Edge, Firefox; "" uses the Windows default browser
+  searchUrl: "https://www.google.com/search?q={query}"
 
 learning:
   enabled: true

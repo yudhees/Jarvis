@@ -24,6 +24,7 @@ export function parsePetEvent(raw: string): PetToCoreEvent | null {
     case 'mute':
     case 'unmute':
     case 'quit':
+    case 'voice_test':
       return { type: o.type };
     case 'input_reply':
       if (typeof o.id !== 'string' || typeof o.value !== 'string') return null;

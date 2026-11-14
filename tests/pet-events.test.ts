@@ -52,3 +52,41 @@ describe('parseCoreEvent (what the pet accepts from core)', () => {
     });
   });
 });
+
+describe('voice test results reaching the Settings window', () => {
+  it('keeps only known, checked fields', () => {
+    const e = parseCoreEvent({
+      type: 'voice_test_result',
+      outcome: 'agent',
+      heard: 'Jarvis, open Slack',
+      text: 'open Slack',
+      sttMs: 900,
+      tier: 'standard',
+      speed: 'normal',
+      model: 'claude-sonnet-5-5',
+      skills: ['a', 5, 'b'],
+      html: '<img src=x onerror=alert(1)>',
+    });
+    assert.ok(e && e.type === 'voice_test_result');
+    if (e?.type !== 'voice_test_result') return;
+    assert.equal(e.request, undefined);
+    assert.deepEqual(e.skills, ['a', 'b']);
+    assert.equal('html' in e, false);
+  });
+
+  it('drops bad outcomes, tiers and missing text', () => {
+    assert.equal(
+      parseCoreEvent({ type: 'voice_test_result', outcome: 'run', heard: '', text: '' }),
+      null,
+    );
+    assert.equal(parseCoreEvent({ type: 'voice_test_result', outcome: 'agent', text: '' }), null);
+    const e = parseCoreEvent({
+      type: 'voice_test_result',
+      outcome: 'agent',
+      heard: '',
+      text: '',
+      tier: 'mega',
+    });
+    assert.equal(e?.type === 'voice_test_result' && e.tier, undefined);
+  });
+});

@@ -52,6 +52,7 @@
     if (focus) tab.focus();
     if (tab.id === 'tab-voice') loadVoices();
     if (tab.id === 'tab-usage') loadUsage();
+    if (tab.id === 'tab-history') loadHistory();
   }
   for (const t of tabs) {
     t.addEventListener('click', () => selectTab(t));
@@ -391,6 +392,254 @@
   );
 
   $('openConfig').addEventListener('click', () => api.openConfigFolder());
+
+  // ---------- voice test: what Jarvis would hear and send ----------
+  const MODEL_LABEL = { simple: 'Haiku', standard: 'Sonnet', complex: 'Opus' };
+  const SPEED_LABEL = {
+    instant: 'instant (you are waiting)',
+    normal: 'normal',
+    background: 'background (take your time)',
+  };
+  const COMMAND_LABEL = {
+    stop: 'stop the current task and go to sleep',
+    sleep: 'end the conversation',
+    mute: 'mute the microphone',
+    status: 'say what it is doing',
+  };
+  const LEARNING_LABEL = {
+    list: 'read out what it has learned about you',
+    forget: 'forget what you named',
+    forget_last: 'forget the last thing it saved',
+    call_me: 'remember what to call you',
+    refuse_rule_change: 'refuse: approval and safety rules only change in config files',
+    vocabulary: 'learn how to spell a word it got wrong',
+    routing_rule: 'remember which model or speed to use for this kind of request',
+    feedback: 'note your feedback on the last answer',
+    remember: 'save this as a note about you',
+  };
+  const DECIDED_LABEL = {
+    forced: 'you asked for this model',
+    follow_up: 'follow-up keeps the current model',
+    learned: 'a preference you taught it',
+    estimate: 'its quick estimate',
+    classifier: 'the Haiku classifier',
+  };
+  let vtTimer;
+
+  function vtRow(id, show) {
+    $(id).hidden = !show;
+    $(id).nextElementSibling.hidden = !show;
+  }
+
+  function vtFinish() {
+    clearTimeout(vtTimer);
+    $('vtLive').hidden = true;
+    $('vtStart').disabled = false;
+    $('vtStart').textContent = 'Test again';
+  }
+
+  function showVoiceTest(r) {
+    vtFinish();
+    const out = $('vtOutcome');
+    out.className = 'vt-outcome';
+    let what;
+    if (r.outcome === 'agent') {
+      what = 'Goes to Claude as a request.';
+    } else if (r.outcome === 'command') {
+      what = `Handled by Jarvis itself, no AI: it would ${COMMAND_LABEL[r.detail] || r.detail}.`;
+      out.classList.add('local');
+    } else if (r.outcome === 'learning') {
+      what = `Handled by Jarvis itself, no AI: it would ${LEARNING_LABEL[r.detail] || r.detail}.`;
+      out.classList.add('local');
+    } else if (r.outcome === 'model_command') {
+      what = `Handled by Jarvis itself: your next request would use ${MODEL_LABEL[r.tier] || r.tier}.`;
+      out.classList.add('local');
+    } else if (r.outcome === 'pending_answer') {
+      what = 'Taken as your yes or no to the question Jarvis just asked.';
+      out.classList.add('local');
+    } else if (r.detail === 'busy') {
+      what = 'Jarvis is busy right now. Try again when it is asleep.';
+      out.classList.add('none');
+    } else if (r.detail === 'muted') {
+      what = 'Jarvis is muted. Unmute it (Ctrl+Alt+M), then test again.';
+      out.classList.add('none');
+    } else {
+      what = r.heard
+        ? 'Only noise or the wake word was heard, so nothing would happen.'
+        : 'Nothing was heard. Check the microphone, then speak right after pressing Test.';
+      out.classList.add('none');
+    }
+    out.textContent = what;
+
+    const heard = r.heard.trim();
+    $('vtHeard').textContent = heard || '(nothing)';
+    $('vtHeard').classList.toggle('none', !heard);
+    $('vtText').textContent = r.text || '(nothing)';
+    $('vtText').classList.toggle('none', !r.text);
+    $('vtCleanNote').textContent =
+      heard && r.text && r.text !== heard ? 'wake word removed and learned spellings applied' : '';
+    vtRow('vtRequestLabel', r.outcome === 'agent');
+    $('vtRequest').textContent = r.request || r.text;
+    const routed = r.outcome === 'agent' && r.tier;
+    vtRow('vtRouteLabel', !!routed);
+    vtRow('vtWhyLabel', !!routed);
+    vtRow('vtSkillsLabel', !!routed);
+    if (routed) {
+      const route = $('vtRoute');
+      const name = document.createElement('span');
+      name.className = 'vt-model';
+      name.textContent = MODEL_LABEL[r.tier] || r.tier;
+      route.replaceChildren(
+        name,
+        ` · ${SPEED_LABEL[r.speed] || r.speed || ''}${r.model ? ` · ${r.model}` : ''}`,
+      );
+      const by = DECIDED_LABEL[r.decidedBy] || r.decidedBy || '';
+      $('vtWhy').textContent =
+        `${by}${r.reason ? `: ${r.reason}` : ''}${r.kind ? ` (${r.kind})` : ''}` +
+        (r.classifier ? '. The classifier would also check it and may pick a bigger model.' : '');
+      $('vtSkills').textContent = r.skills?.length ? r.skills.join(', ') : 'none';
+    }
+    $('vtStt').textContent = r.sttMs ? `${(r.sttMs / 1000).toFixed(1)} s` : '–';
+    $('vtResult').hidden = false;
+  }
+
+  api.onVoiceTest(showVoiceTest);
+  $('vtStart').addEventListener('click', async () => {
+    if (!coreConnected) {
+      toast('Start Jarvis first: the test uses its microphone and Whisper.', true);
+      return;
+    }
+    $('vtStart').disabled = true;
+    $('vtResult').hidden = true;
+    $('vtLive').classList.remove('busy');
+    $('vtLiveText').textContent = 'Listening… speak now';
+    $('vtLive').hidden = false;
+    const ok = await api.voiceTest();
+    if (!ok) {
+      vtFinish();
+      toast('Jarvis is not connected. Start it, then try again.', true);
+      return;
+    }
+    // Core always reports, but never leave the button stuck.
+    vtTimer = setTimeout(() => {
+      vtFinish();
+      toast('No answer from Jarvis. Try again.', true);
+    }, 30000);
+  });
+
+  // ---------- history: the last 10 conversations ----------
+  const H_MODEL = { simple: 'Haiku', standard: 'Sonnet', complex: 'Opus' };
+  const H_OUTCOME = {
+    command: 'spoken command',
+    local: 'handled by Jarvis, no AI',
+    stopped: 'stopped',
+    error: 'failed',
+  };
+  const secs = (ms) => (ms === null || ms === undefined ? '–' : `${(ms / 1000).toFixed(1)} s`);
+
+  function el(tag, cls, text) {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  function when(iso) {
+    const d = new Date(iso);
+    const today = new Date();
+    const yesterday = new Date();
+    yesterday.setDate(today.getDate() - 1);
+    const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    if (d.toDateString() === today.toDateString()) return `Today ${time}`;
+    if (d.toDateString() === yesterday.toDateString()) return `Yesterday ${time}`;
+    return `${d.toLocaleDateString([], { day: 'numeric', month: 'short' })} ${time}`;
+  }
+
+  function line(who, text, extra) {
+    const row = el('div', 'h-line');
+    row.append(el('span', 'h-who', who));
+    const say = el('p', 'h-say', text);
+    if (extra) say.append(document.createElement('br'), el('span', 'h-raw', extra));
+    row.append(say);
+    return row;
+  }
+
+  function renderTurn(t) {
+    const box = el('div', 'h-turn');
+    const raw = t.heard && t.heard.trim() !== t.text ? `Whisper heard: “${t.heard.trim()}”` : '';
+    box.append(line('You', t.text || '(nothing)', raw));
+    if (t.reply) box.append(line('Jarvis', t.reply));
+    const meta = [];
+    if (t.tier) meta.push(H_MODEL[t.tier] || t.tier);
+    if (t.speed) meta.push(t.speed);
+    if (t.decidedBy) meta.push(`decided by ${t.decidedBy}${t.kind ? ` (${t.kind})` : ''}`);
+    if (H_OUTCOME[t.outcome]) meta.push(H_OUTCOME[t.outcome] + (t.command ? `: ${t.command}` : ''));
+    meta.push(`speech-to-text ${secs(t.sttMs)}`);
+    if (t.firstWordMs !== null)
+      meta.push(`first word ${secs(t.firstWordMs)}${t.latencyMiss ? ' (slow)' : ''}`);
+    meta.push(`total ${secs(t.totalMs)}`);
+    if (t.inputTokens)
+      meta.push(`${(t.inputTokens + (t.outputTokens || 0)).toLocaleString()} tokens`);
+    if (t.escalations) meta.push(`escalated ${t.escalations}×`);
+    if (t.toolCalls) meta.push(`${t.toolCalls} lookup${t.toolCalls === 1 ? '' : 's'}`);
+    box.append(el('p', 'h-meta', meta.join(' · ')));
+    if (t.error) box.append(el('p', 'h-error', `Error: ${t.error}`));
+    return box;
+  }
+
+  function renderConversation(c, open) {
+    const details = el('details', 'h-conv');
+    details.open = open;
+    const summary = document.createElement('summary');
+    const title = el('span', 'h-title', c.turns[0]?.text || '(nothing heard)');
+    title.append(
+      el(
+        'span',
+        'h-when',
+        `${when(c.start)} · ${c.turns.length} turn${c.turns.length === 1 ? '' : 's'}`,
+      ),
+    );
+    const badges = el('span', 'h-badges');
+    const models = [...new Set(c.turns.map((t) => H_MODEL[t.tier]).filter(Boolean))];
+    for (const m of models) badges.append(el('span', 'h-badge', m));
+    const errors = c.turns.filter((t) => t.outcome === 'error').length;
+    if (errors)
+      badges.append(el('span', 'h-badge bad', `${errors} error${errors === 1 ? '' : 's'}`));
+    const slow = c.turns.filter((t) => t.latencyMiss).length;
+    if (slow) badges.append(el('span', 'h-badge slow', `${slow} slow`));
+    summary.append(title, badges);
+    const turns = el('div', 'h-turns');
+    for (const t of c.turns) turns.append(renderTurn(t));
+    details.append(summary, turns);
+    return details;
+  }
+
+  async function loadHistory() {
+    let conversations = [];
+    try {
+      conversations = await api.history();
+    } catch {
+      toast('Could not read the history.', true);
+      return;
+    }
+    const list = $('hList');
+    list.replaceChildren(...conversations.map((c, i) => renderConversation(c, i === 0)));
+    $('hEmpty').hidden = conversations.length > 0;
+    $('hDownload').disabled = conversations.length === 0;
+    $('hDownloadAll').disabled = conversations.length === 0;
+  }
+
+  async function downloadHistory(scope) {
+    try {
+      const r = await api.downloadHistory(scope);
+      if (r.saved) toast(`Saved ${r.count} conversation${r.count === 1 ? '' : 's'}`);
+    } catch {
+      toast('Could not save the file.', true);
+    }
+  }
+  $('hRefresh').addEventListener('click', loadHistory);
+  $('hDownload').addEventListener('click', () => downloadHistory('recent'));
+  $('hDownloadAll').addEventListener('click', () => downloadHistory('all'));
 
   // ---------- usage ----------
   const SVGNS = 'http://www.w3.org/2000/svg';

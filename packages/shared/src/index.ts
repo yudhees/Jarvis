@@ -33,7 +33,43 @@ export type CoreToPetEvent =
   | { type: 'budget'; usedFraction: number }
   | { type: 'error'; message: string }
   | InputRequest
-  | { type: 'input_closed'; id: string };
+  | { type: 'input_closed'; id: string }
+  | VoiceTestResult;
+
+/**
+ * Answer to the Settings window's "Test my voice": what Jarvis heard and what
+ * it would do with it. Nothing is sent to Claude and nothing is run or saved.
+ */
+export interface VoiceTestResult {
+  type: 'voice_test_result';
+  /**
+   * nothing = no speech; command = a spoken command handled in code;
+   * pending_answer = a yes/no to a question Jarvis asked; learning = a
+   * "remember / forget / call me" statement handled in code; model_command =
+   * "use Opus" with nothing after it; agent = the request goes to Claude.
+   */
+  outcome: 'nothing' | 'command' | 'pending_answer' | 'learning' | 'model_command' | 'agent';
+  /** Whisper's raw transcript. */
+  heard: string;
+  /** After removing the wake word and applying learned spelling fixes. */
+  text: string;
+  sttMs: number;
+  /** Spoken command (stop, sleep, mute, status) or learning statement type. */
+  detail?: string;
+  /** For outcome agent: the exact request text Claude would get. */
+  request?: string;
+  tier?: ModelTier;
+  speed?: Speed;
+  model?: string;
+  /** Which routing rule decided, and why. */
+  decidedBy?: string;
+  reason?: string;
+  kind?: string;
+  /** The Haiku classifier would be asked (it may raise the tier). */
+  classifier?: boolean;
+  /** Installed skills that would be offered by name. */
+  skills?: string[];
+}
 
 /**
  * Jarvis needs something to continue (a choice, a name, a title). The user can
@@ -75,6 +111,7 @@ export const CORE_TO_PET_TYPES = [
   'error',
   'input_request',
   'input_closed',
+  'voice_test_result',
 ] as const;
 
 /**
@@ -88,4 +125,6 @@ export type PetToCoreEvent =
   | { type: 'unmute' }
   | { type: 'quit' }
   | { type: 'input_reply'; id: string; value: string }
-  | { type: 'input_cancel'; id: string };
+  | { type: 'input_cancel'; id: string }
+  /** Settings window: listen once and report what would happen, without doing it. */
+  | { type: 'voice_test' };

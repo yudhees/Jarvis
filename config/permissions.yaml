@@ -8,6 +8,24 @@ tools:
   memory_search: 0
   skill_read: 0
 
+  # --- Windows control (tier 1: runs without asking, Jarvis says what it did) ---
+  open_app: 1 # Start menu apps only; uninstallers and system tools are refused in code
+  open_url: 1 # http(s) pages and web searches only
+
+  # --- Jira (Jarvis's own tools, REST API + token) ---
+  jira_search: 0
+  jira_get: 0
+  jira_transitions: 0
+  jira_transition: 2 # "move PROJ-142 to In Review"
+  jira_comment: 2
+  jira_create: 2
+
+  # --- Files, only inside files.allowedFolders (DocumentsJarvis) ---
+  file_list: 0
+  file_read: 0
+  file_write: 2
+  file_delete: 3 # spoken confirmation code
+
   # --- Jira / Confluence (Atlassian MCP) ---
   mcp__atlassian__getAccessibleAtlassianResources: 0
   mcp__atlassian__atlassianUserInfo: 0

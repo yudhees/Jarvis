@@ -3,6 +3,8 @@ export {
   cleanTranscript,
   installFile,
   resolveWhisper,
+  serverArgs,
+  VAD_MODEL,
   type WhisperCppOptions,
   WhisperCppStt,
   type WhisperInstall,

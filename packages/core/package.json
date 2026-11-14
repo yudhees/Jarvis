@@ -19,7 +19,10 @@
     "./voice": "./src/voice/index.ts",
     "./hotkey": "./src/hotkey/index.ts",
     "./bridge": "./src/bridge/index.ts",
-    "./usage": "./src/usage/index.ts"
+    "./usage": "./src/usage/index.ts",
+    "./guard": "./src/guard/index.ts",
+    "./audit": "./src/audit/index.ts",
+    "./tools": "./src/tools/index.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "1.3.0",

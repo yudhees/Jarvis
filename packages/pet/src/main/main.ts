@@ -35,6 +35,7 @@ import { cleanAnswer } from './events.ts';
 import {
   openSettings,
   pushSettingsStatus,
+  pushVoiceTest,
   registerSettingsIpc,
   type SettingsDeps,
 } from './settings-window.ts';
@@ -115,7 +116,8 @@ if (coreFromEnv()) {
 // address, and this pet reconnects to it (see 'second-instance' below).
 // A separate profile lets a second copy run beside the real pet (screenshots, checks).
 if (process.env.JARVIS_PET_PROFILE) app.setPath('userData', process.env.JARVIS_PET_PROFILE);
-if (!app.requestSingleInstanceLock(coreFromEnv() ?? {})) app.quit();
+const isPrimaryPet = app.requestSingleInstanceLock(coreFromEnv() ?? {});
+if (!isPrimaryPet) app.quit();
 
 // Keep the pet light: it draws a few SVG shapes, so it needs no GPU process,
 // a small JavaScript heap, and none of Chromium's background extras.
@@ -417,6 +419,10 @@ function closeInput(): void {
 // ---------- events into the window ----------
 
 function show(event: CoreToPetEvent): void {
+  if (event.type === 'voice_test_result') {
+    pushVoiceTest(event); // for the Settings window only, not the pet
+    return;
+  }
   if (event.type === 'state') {
     state = event.state;
     if (state !== 'AWAITING_INPUT' && openInput) closeInput();
@@ -697,6 +703,7 @@ const settingsDeps: SettingsDeps = {
   startCore,
   stopCore,
   restartCore,
+  voiceTest: () => connected && link?.send({ type: 'voice_test' }) === true,
   onOpenChange: (open) => {
     settingsOpen = open;
     if (open) manuallyHidden = false;
@@ -705,6 +712,10 @@ const settingsDeps: SettingsDeps = {
 };
 
 app.whenReady().then(() => {
+  // A copy that handed over to the running pet only quits. If it also connected
+  // to core, core would drop the real pet for it ("a newer pet replaces the old
+  // one") and the real pet would be cut off until it reconnected.
+  if (!isPrimaryPet) return;
   app.setAppUserModelId('Jarvis.Pet');
   loadPrefs();
   loadAppearance();

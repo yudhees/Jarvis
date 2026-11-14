@@ -31,6 +31,7 @@
       <button type="button" role="tab" id="tab-listening" aria-controls="listening" aria-selected="false" tabindex="-1">Listening</button>
       <button type="button" role="tab" id="tab-behavior" aria-controls="behavior" aria-selected="false" tabindex="-1">Behavior</button>
       <button type="button" role="tab" id="tab-usage" aria-controls="usage" aria-selected="false" tabindex="-1">Usage</button>
+      <button type="button" role="tab" id="tab-history" aria-controls="history" aria-selected="false" tabindex="-1">History</button>
       <button type="button" role="tab" id="tab-about" aria-controls="about" aria-selected="false" tabindex="-1">About</button>
     </div>
     <p class="side-note">Changes save on their own and show on the pet right away.</p>
@@ -187,6 +188,29 @@
         <h1>Listening</h1>
         <p>How Jarvis hears its name and knows you have finished.</p>
       </header>
+      <div class="card vt">
+        <h2>Test my voice</h2>
+        <div class="row">
+          <div class="label">
+            <span>See what Jarvis would hear</span>
+            <small>Press Test, then say a request. Jarvis shows what it heard and what it would send to Claude, but doesn't answer or do anything.</small>
+          </div>
+          <div class="control"><button type="button" class="btn primary" id="vtStart">Test</button></div>
+        </div>
+        <div class="vt-live" id="vtLive" hidden role="status" aria-live="polite">
+          <span class="vt-dot" aria-hidden="true"></span><span id="vtLiveText">Listening… speak now</span>
+        </div>
+        <dl class="vt-result" id="vtResult" hidden aria-live="polite">
+          <div class="vt-outcome" id="vtOutcome"></div>
+          <dt>Whisper heard</dt><dd><q id="vtHeard"></q></dd>
+          <dt>After cleanup</dt><dd><q id="vtText"></q> <small id="vtCleanNote"></small></dd>
+          <dt id="vtRequestLabel">Sent to Claude</dt><dd><code class="vt-request" id="vtRequest"></code></dd>
+          <dt id="vtRouteLabel">Model</dt><dd id="vtRoute"></dd>
+          <dt id="vtWhyLabel">Why</dt><dd id="vtWhy"></dd>
+          <dt id="vtSkillsLabel">Skills offered</dt><dd id="vtSkills"></dd>
+          <dt>Speech-to-text</dt><dd id="vtStt"></dd>
+        </dl>
+      </div>
       <div class="card">
         <h2>Wake word</h2>
         <div class="row">
@@ -320,6 +344,24 @@
         </table>
       </div>
       <p class="note">Jarvis runs on your Claude plan, so there is no bill here. Your plan's own usage limits are not visible to Jarvis. Only totals are kept, never what was said, and days older than 30 are deleted.</p>
+    </section>
+
+    <!-- History -->
+    <section role="tabpanel" id="history" aria-labelledby="tab-history" hidden>
+      <header class="head head-row">
+        <div>
+          <h1>History</h1>
+          <p>Your last 10 conversations: what Jarvis heard, what it said, and how.</p>
+        </div>
+        <div class="h-actions">
+          <button type="button" class="btn" id="hRefresh">Refresh</button>
+          <button type="button" class="btn" id="hDownloadAll">Download all</button>
+          <button type="button" class="btn primary" id="hDownload">Download last 10</button>
+        </div>
+      </header>
+      <p class="h-empty" id="hEmpty" hidden>No conversations yet. Say "Hey Jarvis" and ask something, then come back here.</p>
+      <div class="h-list" id="hList"></div>
+      <p class="note">Only text is kept, never audio. Keys, tokens, passwords you say aloud, and card numbers are blanked before saving. Conversations older than 30 days are deleted. Downloads are JSON Lines: one conversation per line, with chat messages ready for training or evaluation and each turn's model, timings and errors.</p>
     </section>
 
     <section role="tabpanel" id="about" aria-labelledby="tab-about" hidden>

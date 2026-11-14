@@ -2,7 +2,8 @@ import type Anthropic from '@anthropic-ai/sdk';
 import type { ModelTier, Speed } from '@jarvis/shared';
 import { buildPromptParts, type PromptSkill } from '../agent/index.ts';
 import type { ModelsConfig } from '../config/index.ts';
-import type { Learner, Proposal } from '../learning/index.ts';
+import type { GatedTools, RunnableTool } from '../guard/index.ts';
+import { type Learner, type Proposal, parseStatement } from '../learning/index.ts';
 import {
   type Classifier,
   type ClassifierOutcome,
@@ -22,12 +23,22 @@ export interface ChatMessage {
   content: string;
 }
 
-/** A read-only tool Jarvis runs itself (tier 0 in permissions.yaml). */
+/** A tool Jarvis runs itself: a lookup (tier 0) or a small action (tier 1). */
 export interface LocalTool {
   name: string;
   description: string;
   inputSchema: { type: 'object'; properties: Record<string, unknown>; required: string[] };
   run(input: Record<string, unknown>): Promise<string> | string;
+  /**
+   * The result is already the spoken reply ("Opened Slack."), so the model is
+   * not asked again to word it. Saves a whole model round for actions.
+   */
+  speaksResult?: boolean;
+  /**
+   * Handles a plain request in code, with no model call at all ("open Slack").
+   * Returns the spoken reply, or undefined to let the model handle it.
+   */
+  quick?(text: string): Promise<string | undefined>;
 }
 
 export interface ModelRequest {
@@ -106,6 +117,8 @@ ${req.context}`,
       usage.outputTokens += final.usage.output_tokens;
       if (final.stop_reason !== 'tool_use' || !useTools) return usage;
 
+      const calls = final.content.filter((b) => b.type === 'tool_use');
+      const speaking = calls.every((b) => tools.find((t) => t.name === b.name)?.speaksResult);
       messages.push({ role: 'assistant', content: final.content });
       const results: Anthropic.ToolResultBlockParam[] = [];
       for (const block of final.content) {
@@ -123,6 +136,11 @@ ${req.context}`,
         }
         results.push({ type: 'tool_result', tool_use_id: block.id, content, is_error: isError });
       }
+      if (speaking) {
+        // Actions word their own result; no second model round to say it.
+        onText(` ${results.map((r) => r.content).join(' ')}`);
+        return usage;
+      }
       messages.push({ role: 'user', content: results });
     }
   }
@@ -135,6 +153,21 @@ export interface AskOptions {
   /** Called when the model starts, for the pet's H/S/O label. */
   onModel?: (tier: ModelTier, model: string, speed: Speed) => void;
 }
+
+/** What Conversation.ask() would do with a text (see preview()). */
+export type ConversationPreview =
+  | { outcome: 'pending_answer' }
+  | { outcome: 'learning'; detail: string }
+  | { outcome: 'model_command'; tier: ModelTier }
+  | {
+      outcome: 'agent';
+      /** The exact request text the model would get. */
+      request: string;
+      decision: RouteDecision;
+      model: string;
+      classifier: boolean;
+      skills: string[];
+    };
 
 export interface AskResult {
   reply: string;
@@ -158,9 +191,19 @@ export interface ConversationOptions {
   maxSkills?: number;
   /**
    * Risk tier of a tool from permissions.yaml (unlisted = 2). Until the approval
-   * gate exists (phase 3), only tier 0 tools are offered to the model.
+   * gate exists (phase 3), only tier 0 and tier 1 tools are offered: tier 1 runs
+   * without asking by design (CLAUDE.md 9).
    */
   toolTier?: (name: string) => number;
+  /** Actions Jarvis can take (open an app, open a page). Offered only at tier 0 or 1. */
+  actions?: readonly LocalTool[];
+  /**
+   * The permission gate (phase 3). With it, every tool and action goes through
+   * the gate and spoken approval, at any tier; without it, only tier 0/1 run.
+   */
+  gated?: GatedTools;
+  /** Service tools (Jira, files), offered only through the gate. */
+  tools?: readonly RunnableTool[];
   /** Haiku classifier for requests the code estimate is unsure about (rule 4). */
   classifier?: Classifier;
   /** Past this, the estimate stands (default 1.5 s). */
@@ -239,13 +282,50 @@ export class Conversation {
   #last: { kind: RequestKind; tier: ModelTier } | undefined;
 
   readonly #tools: LocalTool[];
+  /** This request read installed-skill text, so actions are held (CLAUDE.md 10.3). */
+  #tainted = false;
 
   constructor(options: ConversationOptions) {
     this.#o = options;
     const tier = options.toolTier ?? (() => 2);
-    this.#tools = retrievalTools(options.learner, options.skills ?? []).filter(
-      (t) => tier(t.name) === 0,
-    );
+    const lookups = retrievalTools(options.learner, options.skills ?? [])
+      .filter((t) => tier(t.name) === 0)
+      .map((t) =>
+        t.name === 'skill_read'
+          ? {
+              ...t,
+              run: (input: Record<string, unknown>) => {
+                this.#tainted = true;
+                return t.run(input);
+              },
+            }
+          : t,
+      );
+    const gated = options.gated;
+    if (gated) {
+      // Phase 3: every tool goes through the permission gate (CLAUDE.md 9). It
+      // runs tier 0/1, asks by voice for tier 2/3, denies tier 4, and after
+      // outside text (a skill, a ticket, a file) asks even for tier 1 (10.3).
+      this.#tools = [
+        ...lookups.map((t) => gated.wrap(t.name === 'skill_read' ? { ...t, untrusted: true } : t)),
+        ...(options.actions ?? []).map((t) => gated.wrap(t)),
+        ...(options.tools ?? []).map((t) => gated.wrap(t)),
+      ];
+      return;
+    }
+    // No gate (tests, dev): tier 1 actions run without asking. After reading
+    // text Jarvis did not write (a skill), they would need approval, which only
+    // the gate provides, so they are refused for the rest of that request.
+    const actions = (options.actions ?? [])
+      .filter((t) => tier(t.name) <= 1)
+      .map((t) => ({
+        ...t,
+        run: (input: Record<string, unknown>) =>
+          this.#tainted && tier(t.name) >= 1
+            ? 'Not done: this needs your spoken approval, which is not available yet.'
+            : t.run(input),
+      }));
+    this.#tools = [...lookups, ...actions];
   }
 
   /** What the conversation is on, for "what are you doing?". */
@@ -274,8 +354,49 @@ export class Conversation {
     this.#pending = undefined;
   }
 
+  /**
+   * What ask() would do with this text, without doing any of it: no model or
+   * classifier call, nothing learned or saved, conversation state unchanged.
+   * Mirrors the order of ask(). For the Settings window's voice test.
+   */
+  preview(text: string): ConversationPreview {
+    if (this.#pending && (YES.test(text) || NO.test(text))) {
+      return { outcome: 'pending_answer' };
+    }
+    const statement = parseStatement(text);
+    if (statement) return { outcome: 'learning', detail: statement.type };
+
+    let request = text;
+    let forced = this.#forcedNext;
+    const command = parseModelCommand(text);
+    if (command) {
+      forced = command.tier;
+      if (!command.rest) return { outcome: 'model_command', tier: command.tier };
+      request = command.rest;
+    }
+    const decision = route({
+      text: request,
+      forced,
+      followUpTier: this.#tier,
+      learned: this.#o.learner.routing(),
+    });
+    const skills = this.#o.skills
+      ? selectSkills(this.#o.skills, request, { limit: this.#o.maxSkills ?? SKILL_INDEX_SIZE })
+      : [];
+    return {
+      outcome: 'agent',
+      request,
+      decision,
+      model: this.#o.models.tiers[decision.tier],
+      classifier: decision.needsClassifier && this.#o.classifier !== undefined,
+      skills: skills.map((m) => m.skill.name),
+    };
+  }
+
   async ask(text: string, options: AskOptions): Promise<AskResult> {
     const started = performance.now();
+    this.#tainted = false;
+    this.#o.gated?.newTask();
     let firstSentenceMs: number | null = null;
     const say = (s: string) => {
       firstSentenceMs ??= performance.now() - started;
@@ -323,6 +444,21 @@ export class Conversation {
       request = command.rest;
     }
     this.#forcedNext = undefined;
+
+    // A plain action ("open Slack", "open github.com") is done in code with no
+    // model call. Only tier 0/1 actions are in #tools, so this never skips a gate.
+    for (const t of this.#tools) {
+      const reply = t.quick ? await t.quick(request).catch(() => undefined) : undefined;
+      if (reply) {
+        this.#history.push(
+          { role: 'user', content: request },
+          { role: 'assistant', content: reply },
+        );
+        const max = (this.#o.maxTurns ?? 10) * 2;
+        if (this.#history.length > max) this.#history = this.#history.slice(-max);
+        return local(reply);
+      }
+    }
 
     let decision = route({
       text: request,

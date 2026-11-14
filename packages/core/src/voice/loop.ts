@@ -1,4 +1,4 @@
-import type { CoreToPetEvent, JarvisState } from '@jarvis/shared';
+import type { CoreToPetEvent, JarvisState, VoiceTestResult } from '@jarvis/shared';
 import type { AudioPlayer } from '../audio/index.ts';
 import {
   BargeIn,
@@ -8,11 +8,19 @@ import {
   rmsLevel,
   toDbfs,
 } from '../audio/index.ts';
+import {
+  type ApprovalOutcome,
+  type ApprovalRequest,
+  type Approver,
+  matchApproval,
+  matchConfirmCode,
+  speakCode,
+} from '../guard/index.ts';
 import { StateMachine } from '../state/index.ts';
 import type { SttProvider } from '../stt/index.ts';
 import type { TtsProvider } from '../tts/index.ts';
 import { afterWakeWord, isWakeWordOnly, matchCommand, stripWakeWord } from './commands.ts';
-import type { AskOptions, AskResult } from './conversation.ts';
+import type { AskOptions, AskResult, ConversationPreview } from './conversation.ts';
 import { SpeechQueue } from './speech-queue.ts';
 
 export interface VoiceLoopTiming {
@@ -24,6 +32,8 @@ export interface VoiceLoopTiming {
   followUpMs: number;
   /** Say "Still working on it" if nothing has been spoken by then. */
   fillerMs: number;
+  /** No spoken answer to an approval question by then = cancel (default 20 s). */
+  approvalTimeoutMs?: number;
   /** First-word budget for instant requests (7.1 rule 2); fillerMs is the normal one. */
   instantMs?: number;
   /** Stop and listen when the user talks while Jarvis thinks or speaks (default on). */
@@ -35,10 +45,17 @@ export interface Asker {
   ask(text: string, options: AskOptions): Promise<AskResult>;
   reset(): void;
   warm?(): void;
+  /** What ask() would do, without doing it (voice test). */
+  preview?(text: string): ConversationPreview;
 }
 
 export interface TurnLog {
+  /** The text acted on (wake word removed, learned fixes applied). */
   heard: string;
+  /** Whisper's own text, for the History tab. */
+  raw?: string;
+  /** What went wrong, when the request failed. */
+  error?: string;
   sttMs: number;
   /** From the end of speech to the first audio playing. */
   firstAudioMs: number | null;
@@ -132,6 +149,9 @@ export class VoiceLoop {
   readonly #recent: { frame: Int16Array; start: number }[] = [];
   /** Samples given to the keyword spotter so far (positions are counted the same way). */
   #samples = 0;
+  /** Listening for the answer to an approval question. */
+  #approvalEp: Endpointer | undefined;
+  #approvalDone: ((text: string | null) => void) | undefined;
   readonly #barge: BargeIn;
   /** Level of what Jarvis is playing right now (0..1), for telling its echo from the user. */
   #playing = 0;
@@ -233,6 +253,7 @@ export class VoiceLoop {
     if (this.#sm.state === 'MUTED') return;
     this.#cancelTask();
     this.#ep = undefined;
+    this.#testing = false;
     this.#d.conversation.reset();
     this.#sm.to('SLEEPING');
   }
@@ -242,6 +263,7 @@ export class VoiceLoop {
     if (this.#sm.state === 'MUTED') return;
     this.#cancelTask();
     this.#ep = undefined;
+    this.#testing = false;
     this.#d.conversation.reset();
     this.#sm.to('MUTED');
     this.#mic?.abort();
@@ -273,6 +295,58 @@ export class VoiceLoop {
   toggleMute(): void {
     if (this.#sm.state === 'MUTED') this.unmute();
     else this.mute();
+  }
+
+  /** Set by testVoice(): the next utterance is reported, not answered. */
+  #testing = false;
+
+  /**
+   * Settings window's "Test my voice": listen once like the talk key, then
+   * report what was heard and what would happen (onVoiceTest), without asking
+   * Claude, running a command, or learning anything. Only while asleep or in
+   * the follow-up window; returns false otherwise.
+   */
+  testVoice(): boolean {
+    const state = this.#sm.state;
+    if (state !== 'SLEEPING' && state !== 'FOLLOW_UP') return false;
+    this.#testing = true;
+    if (state === 'SLEEPING') this.#d.onWake?.(); // load Whisper while the user talks
+    this.#listen(this.#d.timing.startTimeoutMs);
+    this.#resume?.resolve();
+    return true;
+  }
+
+  #reportTest(result: Omit<VoiceTestResult, 'type'>): void {
+    this.#testing = false;
+    this.#d.emit({ type: 'voice_test_result', ...result });
+  }
+
+  /** Builds the voice test report for a transcript (pure apart from preview()). */
+  #testResult(heard: string, text: string, sttMs: number): Omit<VoiceTestResult, 'type'> {
+    const base = { heard, text, sttMs };
+    if (!text) return { ...base, outcome: 'nothing' };
+    const command = matchCommand(text);
+    if (command) return { ...base, outcome: 'command', detail: command };
+    const p = this.#d.conversation.preview?.(text);
+    if (!p) return { ...base, outcome: 'agent', request: text };
+    if (p.outcome === 'pending_answer') return { ...base, outcome: 'pending_answer' };
+    if (p.outcome === 'learning') return { ...base, outcome: 'learning', detail: p.detail };
+    if (p.outcome === 'model_command') {
+      return { ...base, outcome: 'model_command', tier: p.tier };
+    }
+    return {
+      ...base,
+      outcome: 'agent',
+      request: p.request,
+      tier: p.decision.tier,
+      speed: p.decision.speed,
+      model: p.model,
+      decidedBy: p.decision.decidedBy,
+      reason: p.decision.reason,
+      kind: p.decision.kind,
+      classifier: p.classifier,
+      skills: p.skills,
+    };
   }
 
   #onFrame(frame: Int16Array): void {
@@ -309,11 +383,141 @@ export class VoiceLoop {
       this.#replay(hit.startSample);
       return;
     }
+    if (state === 'AWAITING_APPROVAL') {
+      this.#feedApproval(frame);
+      return;
+    }
     if ((state === 'THINKING' || state === 'SPEAKING') && this.#d.timing.bargeIn !== false) {
       if (this.#barge.push(frame, this.#playing, this.#floor.dbfs)) this.#bargeIn(state);
       return;
     }
     this.#feed(frame);
+  }
+
+  /**
+   * Spoken approval (CLAUDE.md 9): says what is about to happen, built from the
+   * real tool input, and listens for the answer with the strict matcher. The
+   * pet shows the request; it can never answer it. Tier 3 needs the code.
+   */
+  readonly approver: Approver = {
+    ask: (request) => this.#askApproval(request),
+  };
+
+  async #askApproval(
+    request: ApprovalRequest,
+  ): Promise<{ outcome: ApprovalOutcome; heard?: string }> {
+    const task = this.#task;
+    const state = this.#sm.state;
+    if (!task || task.signal.aborted || (state !== 'THINKING' && state !== 'SPEAKING')) {
+      return { outcome: 'cancel' };
+    }
+    const deadline = performance.now() + (this.#d.timing.approvalTimeoutMs ?? 20_000);
+    this.#sm.to('AWAITING_APPROVAL');
+    const code = request.code ? speakCode(request.code) : undefined;
+    this.#d.emit({
+      type: 'approval_request',
+      id: request.id,
+      sentence: request.sentence,
+      fullText: request.fullText,
+      code,
+    });
+    let outcome: ApprovalOutcome = 'cancel';
+    const heard: string[] = [];
+    try {
+      const ask = code
+        ? `${request.sentence} To confirm, say: confirm ${code}.`
+        : `${request.sentence} Approve or cancel?`;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await this.#sayDuringApproval(
+          attempt === 0 ? ask : 'Please say yes approve, or cancel.',
+          task.signal,
+        );
+        const text = await this.#listenForAnswer(deadline - performance.now(), task.signal);
+        if (text === null) {
+          outcome = task.signal.aborted ? 'cancel' : 'timeout';
+          break;
+        }
+        heard.push(text);
+        if (request.code) {
+          outcome = matchConfirmCode(text, request.code);
+          break; // a wrong code cancels; it does not ask again
+        }
+        const answer = matchApproval(text);
+        if (answer !== 'unclear') {
+          outcome = answer;
+          break;
+        }
+        outcome = 'cancel'; // still unclear after asking again
+      }
+    } catch {
+      outcome = 'cancel';
+    } finally {
+      const approved = outcome === 'approve' || outcome === 'approve_all';
+      this.#d.emit({ type: 'approval_result', id: request.id, approved });
+      this.#approvalEp = undefined;
+      if (this.#sm.state === 'AWAITING_APPROVAL') this.#sm.to('THINKING');
+    }
+    return { outcome, heard: heard.join(' / ') || undefined };
+  }
+
+  /** Says the approval question (stays in AWAITING_APPROVAL, so the pet keeps the bubble). */
+  async #sayDuringApproval(text: string, signal: AbortSignal): Promise<void> {
+    const queue = new SpeechQueue({
+      tts: this.#d.tts,
+      player: this.#d.player,
+      signal,
+      onSentence: (s) => this.#d.emit({ type: 'reply_text', text: s }),
+      onLevel: (level) => this.#onSpeakLevel(level),
+    });
+    queue.say(text);
+    await queue.done();
+    this.#playing = 0;
+  }
+
+  /** Records one answer and transcribes it; null on silence until the deadline, or when stopped. */
+  #listenForAnswer(withinMs: number, signal: AbortSignal): Promise<string | null> {
+    if (withinMs <= 0 || signal.aborted) return Promise.resolve(null);
+    return new Promise((resolve) => {
+      const done = (text: string | null) => {
+        this.#approvalEp = undefined;
+        this.#approvalDone = undefined;
+        signal.removeEventListener('abort', onAbort);
+        resolve(text);
+      };
+      const onAbort = () => done(null);
+      signal.addEventListener('abort', onAbort, { once: true });
+      this.#approvalDone = done;
+      const t = this.#d.timing;
+      this.#approvalEp = new Endpointer({
+        sampleRate: t.sampleRate,
+        frameLength: t.frameLength,
+        silenceMs: t.silenceMs,
+        startTimeoutMs: withinMs,
+        maxMs: Math.min(t.maxRecordMs, withinMs + 8000),
+        floorDbfs: this.#floor.dbfs,
+      });
+    });
+  }
+
+  #feedApproval(frame: Int16Array): void {
+    const ep = this.#approvalEp;
+    const done = this.#approvalDone;
+    if (!ep || !done) return;
+    const r = ep.push(frame);
+    this.#d.emit({ type: 'mic_level', level: rmsLevel(frame) });
+    if (r.type === 'no_speech') {
+      done(null);
+    } else if (r.type === 'end') {
+      this.#approvalEp = undefined; // stop feeding while transcribing
+      void this.#d.stt
+        .transcribe(r.pcm, this.#d.timing.sampleRate, { hints: ['approve', 'cancel', 'confirm'] })
+        .then((t) => {
+          const text = (this.#d.fixTranscript ?? ((x: string) => x))(t.text);
+          this.#d.emit({ type: 'transcript_final', text });
+          done(text);
+        })
+        .catch(() => done(''));
+    }
   }
 
   /** While asleep: find a burst of speech and check it for the wake word. */
@@ -420,6 +624,7 @@ export class VoiceLoop {
       void this.#turn(r.pcm);
     } else if (r.type === 'no_speech') {
       this.#ep = undefined;
+      if (this.#testing) this.#reportTest({ outcome: 'nothing', heard: '', text: '', sttMs: 0 });
       this.#d.conversation.reset();
       this.#sm.to('SLEEPING');
     }
@@ -453,6 +658,9 @@ export class VoiceLoop {
     const task = new AbortController();
     this.#task = task;
     const { signal } = task;
+    // A voice test covers this one utterance only, whatever happens to it.
+    const testing = this.#testing;
+    this.#testing = false;
     const t0 = performance.now();
     const log: TurnLog = { heard: '', sttMs: 0, firstAudioMs: null, totalMs: 0, stopped: false };
     this.#utterance = pcm;
@@ -472,11 +680,19 @@ export class VoiceLoop {
       const fix = this.#d.fixTranscript ?? ((s: string) => s);
       if (isWakeWordOnly(transcript.text)) {
         // Only "Jarvis" was heard: the request is still coming. Keep listening.
+        this.#testing = testing;
         this.#listen(this.#d.timing.startTimeoutMs);
         return;
       }
       const text = fix(stripWakeWord(transcript.text));
+      if (testing) {
+        // Voice test: report, then back to sleep. Nothing is answered, run or learned.
+        this.#reportTest(this.#testResult(transcript.text, text, transcript.ms));
+        this.#sm.to('SLEEPING');
+        return;
+      }
       log.heard = text;
+      log.raw = transcript.text;
       if (!text) {
         // Noise, not words: back to sleep without a reply.
         this.#d.conversation.reset();
@@ -506,7 +722,7 @@ export class VoiceLoop {
         onLevel: (level) => this.#onSpeakLevel(level),
       });
       filler = setTimeout(() => {
-        if (!queue.started) queue.say('Still working on it.');
+        if (!queue.started && this.#sm.state === 'THINKING') queue.say('Still working on it.');
       }, this.#d.timing.fillerMs);
       log.result = await this.#d.conversation.ask(text, {
         signal,
@@ -527,6 +743,7 @@ export class VoiceLoop {
         log.stopped = true;
         return;
       }
+      log.error = err instanceof Error ? err.message : String(err);
       await this.#fail(err);
     } finally {
       clearTimeout(filler);

@@ -28,6 +28,11 @@ export {
   type VoiceLoopTiming,
   WAKE_HINT,
 } from './loop.ts';
-export { MissingKeyError, type OpenedConversation, openConversation } from './open.ts';
+export {
+  LockdownError,
+  MissingKeyError,
+  type OpenedConversation,
+  openConversation,
+} from './open.ts';
 export { SentenceSplitter, spokenNow } from './sentences.ts';
 export { SpeechQueue, type SpeechQueueOptions } from './speech-queue.ts';

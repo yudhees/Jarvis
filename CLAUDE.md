@@ -540,6 +540,38 @@ Needed by phase 4 / 6:
 
 **Phase 0: done (awaiting user sign-off).** **Phase 1: built and unit-tested.** Claude replies work live through the Claude CLI on the user's subscription (`npm run repl`): about 1.8 s to the first answer from cold, and Sonnet when forced about 3.7 s. The wake word uses Windows' own recognizer, so no key or account is needed. `npm start` runs end to end; it has not been tried by voice yet.
 
+**Phase 3: tools and approval, built (awaiting user sign-off).** Decided with the user 2026-11-14: Jira first, and file tools limited to `Documents\Jarvis`.
+- **Design (differs from section 4 on purpose):** no Agent SDK.
+  - The Claude CLI runs on the subscription with no tools at all. The model asks for a tool with a `[[LOOKUP name: args]]` line, and Jarvis runs it behind the gate. This is the strictest lockdown: nothing can run except through Jarvis's code.
+  - Jira uses its REST API with an API token (`tools/jira.ts`) instead of the Atlassian MCP server, which needs an interactive OAuth sign-in a headless Jarvis cannot do. Recorded here instead of the spec's "one read-only and one write-capable MCP server".
+- **Guard** (`core/src/guard/`), tested by the hostile-input suite `tests/guard.test.ts`:
+  - **gate.ts:** tier from permissions.yaml (unlisted = 2, fixed in code), hard blocks, the outside-content rule (10.3), recipient counting, and no more than 3 identical calls. A failing check denies.
+  - **approval.ts:** a strict matcher on the whole utterance. Cancel wins anywhere, and a single word never approves (10.4). Tier 3 codes accept "confirm 47", "confirm four seven", "confirm for seven" and "confirm forty seven"; a wrong code cancels.
+  - **sentences.ts:** the approval sentence is built from the real tool input, and long text is spoken as its length.
+  - **hard-blocks.ts:** forbidden tools; secret and Jarvis-safety paths, checked only in path fields; pushes to main or master and production writes, only on tools that can push. A Jira comment that merely mentions ".env" is not blocked.
+  - **paths.ts:** resolves the real path first, so `..`, absolute paths and links pointing outside are refused (junction test).
+  - **runner.ts (`GatedTools`):** gate, then spoken approval, then run, then audit for every tool, including the Windows actions. Outside results are wrapped as `<untrusted>` data. "Approve all" covers tier 2, the same tool, this task. `JARVIS_DRY_RUN=1` approves, then only logs.
+- **Spoken approval** (`VoiceLoop.approver`):
+  - state `AWAITING_APPROVAL`; the pet gets `approval_request` and `approval_result` and cannot answer;
+  - Jarvis says the sentence plus "Approve or cancel?", or "To confirm, say: confirm four seven";
+  - an unclear answer is asked once more; silence until `approval.timeoutSeconds` (20 s) cancels; the stop key cancels;
+  - the filler never talks over a pending question;
+  - the REPL can answer by typing, for testing only.
+- **Audit log** (`audit/`): `%APPDATA%/jarvis/audit/YYYY-MM-DD.jsonl` records tool calls, decisions, questions, what was heard, outcomes, results and denials. Secrets are redacted by key name and by content. Days older than `retention.transcriptDays` (30) are deleted at start and daily.
+- **Tools:**
+  - **Jira:** `jira_search`, `jira_get` and `jira_transitions` are tier 0; `jira_transition`, `jira_comment` and `jira_create` are tier 2.
+  - **Files:** `file_list` and `file_read` are tier 0, `file_write` is tier 2, `file_delete` is tier 3 (single files only).
+- **Startup self-test:**
+  - Every offered tool must have a tier in permissions.yaml (`LockdownError`).
+  - The Claude CLI's init report must list 0 tools and 0 MCP servers, checked at startup with one tiny Haiku request (live: 0 and 0, 0.6 s) and on every new session.
+- **Verified live through the Claude CLI:** listing and reading files ran unasked; writing asked and wrote after "yes approve"; deleting asked for a code and "confirm 12" cancelled it. The audit log recorded every step, including what was heard.
+- **Not done:**
+  - Jira not tried live: it needs `jira.site` and `jira.email` in jarvis.yaml and `npm run set-key -- jira`;
+  - spoken approval not tried by voice yet (tested with a fake mic);
+  - recipient counting is in the gate, but there's no sending tool yet (Slack is phase 6);
+  - the 5-minute wall-clock limit per task is not enforced yet.
+- 284 tests pass.
+
 **Phase 2: router, done (awaiting user sign-off).** `tests/router.samples.json` routes 30 of 30 requests to the right tier and speed (27 needed). The test also proves rule-decided requests never call the classifier.
 - **Jira issue keys:** a key like PROJ-142 (upper case) makes a request a Jira one.
 - **Haiku classifier (rule 4)** (router/classifier.ts, voice/classifier-model.ts):
@@ -603,13 +635,26 @@ Phase 1 (`npm start`, `npm run repl`):
 - Skills (13.2): finds 57 installed Claude Code skills plus Claude Code commands, agents, and any `skills.extraDirs` folders; picks at most 2 per request.
 - MCP discovery (13.2): finds 11 plugin servers; tiers set for Jira and MongoDB tools; Playwright browser configured but disabled.
 - Grounding system prompt (8).
+- Opening apps and web pages by voice (`core/src/tools/windows.ts`, tier 1, `apps:` in jarvis.yaml):
+  - `open_app` opens any Start menu app through `shell:AppsFolder`. Uninstallers, installers and system or security tools are refused in code.
+  - `open_url` opens a web address, or a web search for anything else, in `apps.browser` (Vivaldi) or a browser the user names. Only http and https.
+  - Nothing is typed or clicked, and no shell is used. If a skill was read in the same request, actions are held (10.3).
+  - Plain "open X" / "open github.com" is done in code with no model call (strict match only: exact name, prefix, or initials like "VS Code"). Anything longer goes to the model.
+  - When the model uses an action, the tool's result is spoken directly, with no second model round. Turns done in code are passed to the warm CLI process, so it isn't restarted.
+  - Tried live: "open Notepad" took 14 ms; "show me the weather in Chennai" took about 1.1 s (Haiku, one round). The first open after startup waits about 2 s for the Start menu list.
 - `npm run learn-repl` (add `--local` without an API key) to try memory, learning, and routing by typing.
 - Questions in the pet (6.2): choice buttons or a text box, "or just say it", Skip, 30 s timeout; secret-looking questions refused; answers never count as approval. Remembered defaults so the same question stops being asked. Checked on screen: the question bubble with choices. Not tried by hand: clicking an answer and typing (covered by unit tests).
-- Settings window (tray > Settings…, `pet/src/main/settings-window.ts`): pet look (robot, orb, or your own PNG/JPEG logo, re-encoded to a 256 px PNG; optional tray icon), theme (system/light/dark), accent and glow colors, size; Windows voice and speed with a Play preview; wake word, strictness, end-of-sentence pause, follow-up window, barge-in; hide when idle, start with Windows, learning. Only an allow-list of jarvis.yaml keys can be written (`core/src/config/settings.ts`, guard-tested); permissions, approvals, budget, folders, services and models stay file-only. Core reloads jarvis.yaml on change: voice and listening timings apply at once, the rest after restart. Checked on screen: the window, orb look and violet accent reaching the pet, voice list. Not tried by hand: logo upload and the preview sound.
+- Settings window (tray > Settings…, `pet/src/main/settings-window.ts`): pet look (robot, orb, or your own PNG/JPEG logo, re-encoded to a 256 px PNG; optional tray icon), theme (system/light/dark), accent and glow colors, size; Windows voice and speed with a Play preview; wake word, strictness, end-of-sentence pause, follow-up window, barge-in; hide when idle, start with Windows, learning. Only an allow-list of jarvis.yaml keys can be written (`core/src/config/settings.ts`, guard-tested); permissions, approvals, budget, folders, services and models stay file-only. Core reloads jarvis.yaml on change: voice and listening timings apply at once, the rest after restart. Checked on screen: the window, orb look and violet accent reaching the pet, voice list. Not tried by hand: logo upload and the preview sound. Also: Start/Stop/Restart for core, more characters, a Usage tab (daily totals under `dataDir/usage`, numbers only, 30 days), and **Test my voice** on the Listening tab: core listens once (`VoiceLoop.testVoice`, pet event `voice_test`) and reports Whisper's text, the cleaned text, and what would happen (`Conversation.preview`: exact request for Claude, tier, speed, model, rule, skills; or the spoken command / learning statement), without answering, running, or learning anything. Tried by voice: "Hey Jarvis, what you are hearing now" showed the request and Haiku/instant. **History** tab: the last 10 conversations (what Whisper heard, the text acted on, the reply, model, rule, timings, tokens, errors and slow answers), saved per turn to `dataDir/history/YYYY-MM-DD.jsonl` (`core/src/usage/history.ts`) with keys, tokens, spoken passwords and card numbers blanked, deleted after `retention.transcriptDays`; download the last 10 or everything as JSONL (one conversation per line: chat `messages` for training or evals, plus per-turn details). Checked on screen with sample data, including the save dialog.
 - Hide pet and Hide when idle (default on, 8 s); the wake word and recording always bring the pet back.
 - Desktop pet, phase 4 app shell (`npm run pet`): Electron, transparent and always on top above the taskbar, click-through except the pet and bubble, draggable with remembered position, tray menu (mute, stop, demo, settings folder, start with Windows, quit), all states and the speech bubble. Main process runs TypeScript directly; the sandboxed preload and the window script are plain JS. Events from core are validated before display and shown with `textContent` only. Until core's WebSocket bridge exists it runs in demo mode (click the pet, or `JARVIS_PET_DEMO=1`). Checked on screen: window, badge, held tool icon, reply bubble, follow-up ring. Not yet seen on screen: the amber approval bubble (screen locked during capture). Still to do for phase 4: core's bridge server, hotkeys in core.
 - `packages/pet/preview/pet-preview.html`: the browser preview used to agree the look.
 - Speech-to-text (phase 1 piece): whisper.cpp b5454 installed by `npm run setup-whisper` from the official GitHub release and Hugging Face, both SHA-256 checked, into `%APPDATA%\jarvis` (12 MB program after pruning, 78 MB model `ggml-base.en-q8_0.bin`). `WhisperCppStt` runs `whisper-server` on 127.0.0.1 with the model loaded (about 0.4 s to start, about 140 MB RAM) and unloads it after 60 s idle. Audio is sent in memory, never written to disk. `npm run stt-test`: Windows voice into Whisper, 96% of words right (misses were "PROJ142" and "10" for "ten"), about 1 s per request on this CPU. Not yet tried with the user's own voice: `npm run stt-test -- --mic 5`.
+- Noise handling for speech-to-text (`stt.vad`, `stt.beamSize`, `stt.suppressNonSpeech` in jarvis.yaml):
+  - **Silero VAD** inside whisper-server (`ggml-silero-v6.2.0.bin`, 0.9 MB, SHA-256 checked, installed by `npm run setup-whisper`): only speech is decoded. Padding is 200 ms; the default 30 ms cut off first words ("Why is the" heard as "YSB"). If the file is missing, Jarvis warns and runs without it.
+  - **Beam search 5** and **non-speech tokens suppressed**.
+  - Measured with `npm run stt-test -- --noise 5` (Windows voice plus fan-like noise and hum, 1 s of noise alone before and after): without VAD, noise alone was heard as "You"; with VAD, nothing. Words right, clean / 5 dB / 0 dB noise: plain 93 / 92 / 92%, VAD + greedy 93 / 93 / 87%, VAD + beam 5 93 / 91 / 93%. Beam 5 costs about 0.3 s per request (about 1.4 s to 1.7 s).
+  - `stt-test` now uses its own port (stt.port + 1), so it never reuses a running Jarvis's server. `--plain` and `--beam N` compare settings.
+  - Not done: real noise suppression of the mic signal (RNNoise or speexdsp as WebAssembly) and echo cancellation, planned for phase 5. Not tried with the user's own voice and room yet.
 - Footprint measured 2026-11-14: whisper 12 MB + model 78 MB on disk; pet about 116 MB private RAM (Electron, GPU process off); Electron's 144 MB download cache deleted.
 - 174 tests pass (including the Claude CLI lockdown, the live Windows wake word, one-breath replay, hotkey-only mode, the pet bridge, and interruptions). Phase 1 added tests for the state machine, endpointer, spoken commands, sentence splitting, the conversation (escalation, retrieval tools, stop mid-reply), and the voice loop with a fake mic, keywords, speech and playback.
 
