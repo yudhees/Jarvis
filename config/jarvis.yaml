@@ -48,6 +48,11 @@ files:
 retention:
   transcriptDays: 30
 
+brain: # who answers
+  provider: claude-cli # your Claude subscription through Claude Code (no API key, no extra billing); or: api
+  cliPath: null # null = find claude.exe (%USERPROFILE%/.local/bin, then PATH)
+  idleStopSeconds: 60 # close the CLI after a minute without requests (frees ~200 MB)
+
 stt: # speech-to-text: turns what you say into text for Claude
   provider: whisper-cpp # runs on this PC; install with: npm run setup-whisper
   model: ggml-base.en-q8_0.bin # bigger and more accurate: ggml-small.en-q5_1.bin

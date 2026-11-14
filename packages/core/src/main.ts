@@ -153,7 +153,7 @@ process.on('SIGINT', () => {
 });
 
 console.log(
-  `Jarvis is ready. Memory: ${opened.memory}. ${opened.skillCount} skills found.\n` +
+  `Jarvis is ready. Brain: ${opened.brain}. Memory: ${opened.memory}. ${opened.skillCount} skills found.\n` +
     `Say "${jarvis.keywords.wake === 'jarvis' ? 'Jarvis' : 'the wake word'}", then your request. ` +
     'Ctrl+Alt+J stops, Ctrl+Alt+M mutes, Ctrl+C quits.',
 );
@@ -162,6 +162,6 @@ try {
 } finally {
   hotkeys.close();
   keywords.release();
-  await Promise.allSettled([stt.close(), tts.close()]);
+  await Promise.allSettled([stt.close(), tts.close(), opened.model.close?.()]);
   console.log('Bye.');
 }

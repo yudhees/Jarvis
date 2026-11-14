@@ -23,6 +23,7 @@ export interface VoiceLoopTiming {
 export interface Asker {
   ask(text: string, options: AskOptions): Promise<AskResult>;
   reset(): void;
+  warm?(): void;
 }
 
 export interface TurnLog {
@@ -149,6 +150,7 @@ export class VoiceLoop {
       this.#floor.push(frame);
       if (keyword === 'wake') {
         this.#d.onWake?.();
+        this.#d.conversation.warm?.();
         this.#listen(this.#d.timing.startTimeoutMs);
       }
       return;

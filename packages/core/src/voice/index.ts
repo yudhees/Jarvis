@@ -1,3 +1,4 @@
+export { type ClaudeCliOptions, ClaudeCliReplyModel, findClaudeExe } from './claude-cli.ts';
 export { matchCommand, normalizeUtterance, type SpokenCommand, stripWakeWord } from './commands.ts';
 export {
   type AskOptions,
@@ -6,6 +7,7 @@ export {
   ClaudeReplyModel,
   Conversation,
   type ConversationOptions,
+  type LocalTool,
   type ModelRequest,
   type ModelUsage,
   type ReplyModel,

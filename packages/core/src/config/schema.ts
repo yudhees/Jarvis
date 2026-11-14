@@ -94,6 +94,14 @@ export const jarvisSchema = z.strictObject({
   retention: z.strictObject({
     transcriptDays: positiveInt,
   }),
+  brain: z.strictObject({
+    /** claude-cli = the user's Claude subscription through Claude Code; api = an API key. */
+    provider: z.enum(['claude-cli', 'api']),
+    /** Path to claude.exe; null = find it. */
+    cliPath: z.string().min(1).nullable(),
+    /** Close the Claude CLI after this long without a request (frees ~200 MB). */
+    idleStopSeconds: z.int().min(10).max(3600),
+  }),
   stt: z.strictObject({
     provider: z.literal('whisper-cpp'),
     model: z.string().regex(/^ggml-[\w.-]+\.bin$/, 'must be a ggml-*.bin model file name'),

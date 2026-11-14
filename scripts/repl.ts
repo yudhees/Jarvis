@@ -6,7 +6,7 @@
  *   npm run repl -- --speak      replies also spoken
  *   npm run repl -- --local      memory kept only while running
  *
- * Needs the Anthropic key: npm run set-key -- anthropic
+ * Uses your Claude subscription through Claude Code (brain.provider in jarvis.yaml).
  */
 import { createInterface } from 'node:readline';
 import { PvSpeakerPlayer } from '@jarvis/core/audio';
@@ -30,6 +30,7 @@ try {
   process.exit(1);
 }
 const { conversation } = opened;
+conversation.warm(); // start the model while you type
 const tts = args.speak
   ? new WindowsSapiTts({
       voice: jarvis.voice.voice,
@@ -40,7 +41,7 @@ const tts = args.speak
 const player = args.speak ? new PvSpeakerPlayer(jarvis.audio.outputDevice) : undefined;
 
 console.log(
-  `Memory: ${opened.memory}. ${opened.skillCount} skills found. Type :quit to exit, :new for a new conversation.\n`,
+  `Brain: ${opened.brain}. Memory: ${opened.memory}. ${opened.skillCount} skills found.\nType :quit to exit, :new for a new conversation.\n`,
 );
 const MODEL_LETTER = { simple: 'H', standard: 'S', complex: 'O' } as const;
 
@@ -53,6 +54,7 @@ for await (const raw of rl) {
   if (line === ':quit') break;
   if (line === ':new') {
     conversation.reset();
+    conversation.warm();
     console.log('(new conversation)');
   } else if (line) {
     const command = matchCommand(line);
@@ -92,3 +94,4 @@ for await (const raw of rl) {
 }
 rl.close();
 await tts?.close();
+await opened.model.close?.();

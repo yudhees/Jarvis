@@ -74,7 +74,7 @@ Core owns everything that must keep working without the pet: the kill switches, 
 | Agent | `@anthropic-ai/claude-agent-sdk` | `query()` with `model`, `mcpServers`, `canUseTool`, `hooks`, `maxTurns`. Locked down as described below |
 | Custom tools | `createSdkMcpServer()` + `tool()` | In-process MCP server for Windows control, memory, scheduler |
 | Pet UI | Electron | Transparent, frameless, always-on-top window |
-| Memory | Claude Memory Store (Anthropic-hosted, beta) via `@anthropic-ai/sdk` `client.beta.memoryStores` | Nothing stored on the PC. One store named "Jarvis user memory", found by name or created on first run. Every change is versioned there. `InMemoryFiles` backend for tests and `--local` runs |
+| Memory | With the Claude CLI (default): one small JSON file, `dataDir/memory.json` (`LocalMemoryFiles`), because the Claude Memory Store needs an API key. With `brain.provider: api`: Claude Memory Store (beta) via `client.beta.memoryStores` | Secrets are rejected before saving. `InMemoryFiles` for tests and `--local` runs |
 | Audit log | JSONL under `%APPDATA%/jarvis` | Local on purpose: the audit trail must not depend on the network |
 | Skills | Claude Code skills already installed (`~/.claude/skills`, plugin and org-synced plugin skills) | Read from disk, best 1–2 per request injected into the prompt (13.2) |
 | Integrations | MCP servers that Claude Code plugins declare (Jira/Atlassian, MongoDB, GitHub, Slack, ...) plus Playwright MCP for the browser | Discovered from plugin files; enabled in `config/mcp.yaml`; Jarvis signs in itself (13.2) |
@@ -88,7 +88,17 @@ Core owns everything that must keep working without the pet: the kill switches, 
 - Use the permission mode that sends every tool call through `canUseTool`. Never use a bypass or accept-edits mode, and never pass an `allowedTools` list that skips the gate.
 - A startup self-test lists the tools the agent can see and refuses to start if any tool is not in `config/permissions.yaml` or the built-in tools are visible.
 
-**Auth:** Jarvis calls the API with its own API key (from Credential Manager), not the user's Claude plan login. The budget guard counts tokens and cost, which needs API billing, and the Agent SDK's terms should be checked before using plan login in a custom app.
+**Auth (decided by the user, 2026-11-14): no separate API billing.** Jarvis runs on the user's existing Claude subscription by driving the installed Claude Code CLI (`brain.provider: claude-cli`, voice/claude-cli.ts). Jarvis never reads Claude Code's credentials; the CLI signs itself in.
+- **Lockdown:** the CLI runs locked down, in an empty folder under `dataDir/cli`, with these flags:
+  - `--tools ""`: no built-in tools;
+  - `--strict-mcp-config`: no MCP servers;
+  - `--setting-sources ""`: no user or project settings, and so no hooks;
+  - `--disable-slash-commands`, `--no-session-persistence`.
+- **No API billing:** `ANTHROPIC_API_KEY` and `ANTHROPIC_AUTH_TOKEN` are removed from its environment, so it can't switch to API billing.
+- **Lookups:** Jarvis's own lookups (`memory_search`, `skill_read`) are requested with a `[[LOOKUP name: arg]]` line and run by Jarvis.
+- **Speed and memory:** one warm process per conversation, started on the wake word and closed after `brain.idleStopSeconds`. It uses about 200 MB while open; a cold first answer takes about 1.8 s.
+- **Fallback:** `brain.provider: api` (an API key in Credential Manager) remains as a fallback only.
+- **Budget:** the budget guard counts tokens; subscription usage limits apply instead of cost.
 
 The Agent SDK and model names change often. **Before writing any SDK code, read the current docs** at `https://platform.claude.com/docs/en/agent-sdk/typescript` and confirm option names, the `canUseTool` signature, how to disable built-in tools and settings sources, and the current model IDs.
 
@@ -528,7 +538,7 @@ Needed by phase 4 / 6:
 
 ## 18. Status
 
-**Phase 0: done (awaiting user sign-off).** **Phase 1: built and unit-tested; not yet tried live.** It needs the Anthropic and Picovoice keys: `npm run set-key -- anthropic` and `npm run set-key -- picovoice`.
+**Phase 0: done (awaiting user sign-off).** **Phase 1: built and unit-tested.** Claude replies work live through the Claude CLI on the user's subscription (`npm run repl`): about 1.8 s to the first answer from cold, and Sonnet when forced about 3.7 s. The wake word still needs the Picovoice AccessKey: `npm run set-key -- picovoice`.
 
 Phase 1 (`npm start`, `npm run repl`):
 - `VoiceLoop` (core/src/voice/loop.ts): one mic stream feeds everything. Porcupine hears every frame, even while Jarvis is thinking or speaking, so "Jarvis" or the stop keyword always interrupts. States follow section 6 through `StateMachine` (state/machine.ts). Speech-to-text never runs on Jarvis's own voice.
@@ -545,14 +555,14 @@ Phase 1 (`npm start`, `npm run repl`):
   - Skills are listed by name and description only. The model reads a skill's full text with `skill_read` and recalls notes with `memory_search`.
   - Both tools are read-only, run by Jarvis itself, and set to tier 0 in permissions.yaml. They're offered only while they stay at tier 0, because the approval gate comes in phase 3.
   - Tool exchanges aren't kept in the conversation history, and the "About the user" block stays capped at 300 tokens.
-- Keys live in Windows Credential Manager as Generic credentials `jarvis:anthropic` and `jarvis:picovoice` (secrets/credman.ps1). `npm run set-key -- <name>` asks for the key in a hidden PowerShell prompt, so Node never sees it; `--check` shows which keys are saved. This settles the section 17 decision: a PowerShell bridge, no native module.
+- Keys live in Windows Credential Manager as Generic credentials `jarvis:picovoice` (and `jarvis:anthropic`, only for the API fallback) (secrets/credman.ps1). `npm run set-key -- <name>` asks for the key in a hidden PowerShell prompt, so Node never sees it; `--check` shows which keys are saved. This settles the section 17 decision: a PowerShell bridge, no native module.
 - Hotkeys are registered by core (hotkey/hotkey-host.ps1, a RegisterHotKey message loop): Ctrl+Alt+J stops, Ctrl+Alt+M toggles mute. Registering takes about 0.7 s.
 - Whisper starts loading when the wake word is heard, while the user is still talking.
 - If the Claude Memory Store can't be opened, memory falls back to a temporary store.
 - Not done in phase 1:
   - core's WebSocket bridge to the pet (phase 4; the console shows events for now);
   - measuring against the 3-second end-to-end target;
-  - live Porcupine and Claude calls (no keys on this PC yet).
+  - the live wake word (no Picovoice key on this PC yet).
 
 **Built ahead of plan (no audio or model calls needed), all tested:**
 - Memory on the Claude Memory Store (13), with local in-memory fallback. Not yet run against the live store: no Anthropic API key on this PC yet.
@@ -568,7 +578,7 @@ Phase 1 (`npm start`, `npm run repl`):
 - `packages/pet/preview/pet-preview.html`: the browser preview used to agree the look.
 - Speech-to-text (phase 1 piece): whisper.cpp b5454 installed by `npm run setup-whisper` from the official GitHub release and Hugging Face, both SHA-256 checked, into `%APPDATA%\jarvis` (12 MB program after pruning, 78 MB model `ggml-base.en-q8_0.bin`). `WhisperCppStt` runs `whisper-server` on 127.0.0.1 with the model loaded (about 0.4 s to start, about 140 MB RAM) and unloads it after 60 s idle. Audio is sent in memory, never written to disk. `npm run stt-test`: Windows voice into Whisper, 96% of words right (misses were "PROJ142" and "10" for "ten"), about 1 s per request on this CPU. Not yet tried with the user's own voice: `npm run stt-test -- --mic 5`.
 - Footprint measured 2026-11-14: whisper 12 MB + model 78 MB on disk; pet about 116 MB private RAM (Electron, GPU process off); Electron's 144 MB download cache deleted.
-- 153 tests pass. Phase 1 added tests for the state machine, endpointer, spoken commands, sentence splitting, the conversation (escalation, retrieval tools, stop mid-reply), and the voice loop with a fake mic, keywords, speech and playback.
+- 159 tests pass (including the Claude CLI lockdown, lookups, stop and restart, against a fake CLI). Phase 1 added tests for the state machine, endpointer, spoken commands, sentence splitting, the conversation (escalation, retrieval tools, stop mid-reply), and the voice loop with a fake mic, keywords, speech and playback.
 
 Kept lightweight: Node 22.18+ runs the TypeScript directly (type stripping, no build step, no tsx), tests use the built-in `node:test`, and Biome is the only lint/format tool. Dev deps: `typescript`, `@types/node`, `@biomejs/biome`. Runtime deps: `zod`, `yaml`, `@anthropic-ai/sdk`, `@picovoice/pvrecorder-node`, `@picovoice/pvspeaker-node`, `@picovoice/porcupine-node` (4.0.2, 7 MB, prebuilt).
 

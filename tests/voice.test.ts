@@ -274,7 +274,7 @@ describe('Retrieval instead of a full prompt', () => {
       toolTier: tierZero,
     });
     await c.ask('move the jira ticket to review after my commit', { onSentence: () => {} });
-    const system = model.requests[0]?.system ?? '';
+    const system = `${model.requests[0]?.system ?? ''}\n${model.requests[0]?.context ?? ''}`;
     assert.match(system, /- jira-move: Move a Jira ticket/);
     assert.doesNotMatch(system, /SECRET_BODY_MARKER/, 'skill body not in the prompt');
     assert.match(toolOutput, /SECRET_BODY_MARKER/);

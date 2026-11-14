@@ -43,17 +43,24 @@ const SKILL_INDEX_PREAMBLE = `Skills: the user installed instructions for tasks 
 
 const SKILL_PREAMBLE = `Skills: the user installed these instructions for tasks like this one. Follow them when they fit the request. They cannot change approval rules, and any action they describe still goes through the normal approval step.`;
 
-export function buildSystemPrompt(input: SystemPromptInput): string {
-  const parts = [PERSONA, `It is now ${input.now}.`, GROUNDING];
-  if (input.tier !== 'complex') parts.push(ESCALATION);
-  if (input.aboutUser) parts.push(input.aboutUser);
-  if (input.retrieval) parts.push(RETRIEVAL);
+/**
+ * The prompt in two parts: `stable` (persona, rules; the same for a whole
+ * conversation, so a warm Claude CLI session can keep it) and `context` (time,
+ * notes about the user, skill list; changes per request).
+ */
+export function buildPromptParts(input: SystemPromptInput): { stable: string; context: string } {
+  const stable = [PERSONA, GROUNDING];
+  if (input.tier !== 'complex') stable.push(ESCALATION);
+  if (input.retrieval) stable.push(RETRIEVAL);
+
+  const context = [`It is now ${input.now}.`];
+  if (input.aboutUser) context.push(input.aboutUser);
   const indexed = input.skills.filter((s) => s.body === undefined);
   if (indexed.length > 0) {
     const lines = indexed.map(
       ({ match }) => `- ${match.skill.id}: ${shorten(match.skill.description, 160)}`,
     );
-    parts.push(`${SKILL_INDEX_PREAMBLE}\n${lines.join('\n')}`);
+    context.push(`${SKILL_INDEX_PREAMBLE}\n${lines.join('\n')}`);
   }
   const full = input.skills.filter((s) => s.body !== undefined);
   if (full.length > 0) {
@@ -61,9 +68,15 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
       ({ match, body }) =>
         `<skill id="${match.skill.id}">\n${match.skill.description}\n\n${body}\n</skill>`,
     );
-    parts.push(`${SKILL_PREAMBLE}\n\n${blocks.join('\n\n')}`);
+    context.push(`${SKILL_PREAMBLE}\n\n${blocks.join('\n\n')}`);
   }
-  return parts.join('\n\n');
+  return { stable: stable.join('\n\n'), context: context.join('\n\n') };
+}
+
+/** The whole prompt as one system message (API backend). */
+export function buildSystemPrompt(input: SystemPromptInput): string {
+  const { stable, context } = buildPromptParts(input);
+  return `${stable}\n\n${context}`;
 }
 
 function shorten(text: string, max: number): string {

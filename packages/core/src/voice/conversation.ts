@@ -1,6 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import type { ModelTier, Speed } from '@jarvis/shared';
-import { buildSystemPrompt, type PromptSkill } from '../agent/index.ts';
+import { buildPromptParts, type PromptSkill } from '../agent/index.ts';
 import type { ModelsConfig } from '../config/index.ts';
 import type { Learner, Proposal } from '../learning/index.ts';
 import {
@@ -29,7 +29,10 @@ export interface LocalTool {
 
 export interface ModelRequest {
   model: string;
+  /** Persona and rules: the same for the whole conversation. */
   system: string;
+  /** Time, notes about the user, skill list: changes per request. */
+  context: string;
   messages: readonly ChatMessage[];
   maxTokens: number;
   tools?: readonly LocalTool[];
@@ -45,6 +48,9 @@ export interface ModelUsage {
 /** The model call, behind an interface so tests need no network. */
 export interface ReplyModel {
   stream(req: ModelRequest, onText: (delta: string) => void): Promise<ModelUsage>;
+  /** Optional: get ready for a request (start a process) before it arrives. */
+  warm?(req: Pick<ModelRequest, 'model' | 'system' | 'tools'>): void;
+  close?(): Promise<void>;
 }
 
 /** Most tool rounds per reply; memory and skill lookups need one or two. */
@@ -75,7 +81,9 @@ export class ClaudeReplyModel implements ReplyModel {
         {
           model: req.model,
           max_tokens: req.maxTokens,
-          system: req.system,
+          system: `${req.system}
+
+${req.context}`,
           messages,
           ...(useTools
             ? {
@@ -236,6 +244,19 @@ export class Conversation {
     return this.#tier;
   }
 
+  /** The wake word was heard: let the model get ready while the user talks. */
+  warm(): void {
+    if (this.#history.length > 0 || !this.#o.model.warm) return;
+    const { stable } = buildPromptParts({
+      tier: 'simple',
+      aboutUser: '',
+      skills: [],
+      now: '',
+      retrieval: this.#tools.some((t) => t.name === 'memory_search'),
+    });
+    this.#o.model.warm({ model: this.#o.models.tiers.simple, system: stable, tools: this.#tools });
+  }
+
   /** Ends the conversation (back to sleep): the next request starts fresh on Haiku. */
   reset(): void {
     this.#generation++;
@@ -324,14 +345,14 @@ export class Conversation {
     for (;;) {
       const model = this.#o.models.tiers[tier];
       options.onModel?.(tier, model, decision.speed);
-      const system = buildSystemPrompt({
+      const prompt = buildPromptParts({
         tier,
         aboutUser: learner.aboutUserBlock(),
         skills,
         now: spokenNow(this.#o.now?.() ?? new Date()),
         retrieval: this.#tools.some((t) => t.name === 'memory_search'),
       });
-      const result = await this.#streamOnce(model, tier, system, say, options.signal);
+      const result = await this.#streamOnce(model, tier, prompt, say, options.signal);
       usage.inputTokens += result.usage.inputTokens;
       usage.outputTokens += result.usage.outputTokens;
       usage.toolCalls += result.usage.toolCalls;
@@ -379,7 +400,7 @@ export class Conversation {
   async #streamOnce(
     model: string,
     tier: ModelTier,
-    system: string,
+    prompt: { stable: string; context: string },
     say: (s: string) => void,
     signal: AbortSignal | undefined,
   ): Promise<{ text: string; escalate: boolean; usage: ModelUsage }> {
@@ -389,7 +410,8 @@ export class Conversation {
     const usage = await this.#o.model.stream(
       {
         model,
-        system,
+        system: prompt.stable,
+        context: prompt.context,
         messages: [...this.#history],
         maxTokens: MAX_TOKENS[tier],
         tools: this.#tools,
